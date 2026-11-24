@@ -616,16 +616,9 @@ export function renderConversationalPreflightBriefing(params: {
     return [
       "### 🛠️ VetoBoard 战前检索与推荐阵容准备单",
       "",
-      `- **📚 三大复用资产库检索完成**：共检索到 **${retrieved.roles.length} 个可复用角色**（已沉淀自定义库 \`${savedLibCount}\` 个 · 本机 Agent \`${ideAgentCount}\` 个 · 标准角色 \`${builtinCount}\` 个）+ **${retrieved.skills.length} 个可复用技能包** + **${matchedKb.length} 条命中历史实战知识卡**。`,
-      ...(rationale.length > 0 ? [`- **⚖️ 智能定权调整**：${rationale.join("；")}`] : []),
-      ...(kbLines.length > 0
-        ? [
-            `- **📖 命中的前序实战知识库（默认自动挂载继承底数，免重算旧账；若想推翻重来回复「不挂旧知识卡」即可）**：`,
-            ...kbLines,
-          ]
-        : []),
-      `- **🌐 全课题强制先联网实证 + Effort-Scaling 配额上限**：上白板前必先执行联网检索锚定真实在售三档具体型号/现价/现行法规/官方文档（附真实 \`https://\` 链接），同时严控检索配额上限（白板摸底 ≤5~8 次、重度执行 ≤12~18 次，2 次无果立即标 \`【待确认】\` 止损防死循环）！`,
-      `- **📋 动态共享白板与 ELECTRE+QMV 数学裁决引擎（默认激活）**：**① 并发联网备课贴白板** → **② 全员阅板留痕（赞同吸收 vs 动态维度拉人协商，防混战）** → **③ 运筹学数学支配裁决（D ≥ 60%/65% · C ≥ 66.7% · 席位 ≥ 50% · R≤2 零变化早停转人工）** → **④ 并发定稿 + [V1] 终检存知识库 & 退回普通对话**！`,
+      "> ⚡ **极速开跑（零表单 · 直接说人话即可）**：",
+      "> - **认可推荐阵容**：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
+      "> - **自由换模型 / 改分数 / 临时加人**：直接回复如 **「精算用 Opus，督察用 Carbon，再加一个财务与人效 ROI 专员，开跑」**。",
       "",
       "| 拟上场席位 | 资产来源 | 自动挂载技能 | 推荐运行模型（可改） | 推荐定位 & 权重分 | 为什么推荐这个分数？（定权依据） |",
       "| :--- | :--- | :--- | :--- | :--- | :--- |",
@@ -633,26 +626,25 @@ export function renderConversationalPreflightBriefing(params: {
       "",
       `- **🎯 当前平台可选模型池${hostPlatform ? ` (${hostPlatform})` : ""}**：${modelMenuLine}`,
       `- **✨ 可一键孵化为新角色的本机原生技能**（用后自动沉淀进复用库）：${gapLine}`,
+      ...(kbLines.length > 0
+        ? [
+            `- **📖 命中的前序实战知识库（默认自动挂载继承底数；若想重算回复「不挂旧知识卡」）**：`,
+            ...kbLines,
+          ]
+        : []),
       "",
-      "> **💬 请确认或直接对话选模型 / 调权重**：",
-      "> - 认可上述推荐与模型搭配：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
-      "> - **想自由换模型 / 改分数 / 加技能角色**：直接用自然语言说即可（例如：**「精算用 Claude Opus，市场用 Gemini 4，督察用 GPT-OSS 120B，工程降到 55 分开跑」** 或 **「精算用 opus，工程用 haiku」**）。",
+      "---",
+      `- **📚 三大复用资产库检索完成**：共命中 **${retrieved.roles.length} 个可复用角色**（已沉淀自定义库 \`${savedLibCount}\` 个 · 本机 Agent \`${ideAgentCount}\` 个 · 标准角色 \`${builtinCount}\` 个）+ **${retrieved.skills.length} 个可复用技能包** + **${matchedKb.length} 条历史实战知识卡**${rationale.length > 0 ? `（${rationale.join("；")}）` : ""}。`,
+      `- **🛡️ 已激活底座硬门禁**：全课题先联网实证（白板 ≤5~8 次 / 定稿 ≤12~18 次配额封顶，2 次无果标 \`【待确认】\` 止损） + **动态共享白板 ELECTRE+QMV 数学裁决**（D ≥ 60%/65% · C ≥ 66.7% · R≤2 早停） + \`[V1]\` 0.5% 容差独立核账。`,
     ].join("\n");
   }
 
   return [
     "### 🛠️ VetoBoard Pre-Flight Library Retrieval & Recommended Lineup",
     "",
-    `- **📚 3-Pillar Asset Library Scan**: Retrieved **${retrieved.roles.length} reusable roles** (${savedLibCount} saved custom · ${ideAgentCount} native IDE agents · ${builtinCount} core) + **${retrieved.skills.length} skills** + **${matchedKb.length} matched Knowledge Cards**.`,
-    ...(rationale.length > 0 ? [`- **⚖️ Smart Weighting**: ${rationale.join("; ")}`] : []),
-    ...(kbLines.length > 0
-      ? [
-          `- **📖 Matched Historical Knowledge Cards (Mounted automatically; say "no knowledge" to start fresh)**:`,
-          ...kbLines,
-        ]
-      : []),
-    `- **🌐 Mandatory Live Web Grounding + Effort-Scaling Search Quota**: All domains must verify live primary URLs first while obeying strict 20/60/20 search ceilings (<=5-8 calls on board prep, <=12-18 on deep research; immediate \`[ASSUMPTION]\` stop-loss after 2 empty queries).`,
-    `- **📋 Dynamic Shared Whiteboard & ELECTRE+QMV Engine (Default)**: **① Concurrent Web-Grounded Prep & Post** -> **② Review & React** -> **③ Mathematical Dominance Gate (D >= 60%/65%, C >= 66.7%, Seats >= 50%, R<=2 Early Stop)** -> **④ Parallel Finalize + [V1] Audit, Knowledge Save & Exit**.`,
+    "> ⚡ **Quick Start (Plain Language · Zero Forms)**:",
+    "> - **Accept defaults**: Reply **\"Go\"** (or **\"Run only #1 and #2\"**);",
+    "> - **Customize freely**: Reply naturally (e.g. **\"Use opus for profit-modeler, add an ROI efficiency specialist, and go\"**).",
     "",
     "| Proposed Seat | Asset Origin | Mounted Skills | Recommended Model (Editable) | Tier & Score | Why This Score? |",
     "| :--- | :--- | :--- | :--- | :--- | :--- |",
@@ -660,9 +652,15 @@ export function renderConversationalPreflightBriefing(params: {
     "",
     `- **🎯 Available Models${hostPlatform ? ` (${hostPlatform})` : ""}**: ${modelMenuLine}`,
     `- **✨ Native Skills Available to Hatch into Reusable Roles**: ${gapLine}`,
+    ...(kbLines.length > 0
+      ? [
+          `- **📖 Matched Historical Knowledge Cards (Mounted automatically; say "no knowledge" to start fresh)**:`,
+          ...kbLines,
+        ]
+      : []),
     "",
-    "> **💬 Confirm or Pick Models / Weights in Plain Language**:",
-    "> - Reply **\"Go\"** (or **\"Run only #1 and #2\"**);",
-    "> - Or customize models & scores naturally (e.g. **\"Use opus for profit-modeler, haiku for tech-feasibility, and set legal-advisor to 98\"**).",
+    "---",
+    `- **📚 3-Pillar Asset Library Scan**: Retrieved **${retrieved.roles.length} reusable roles** (${savedLibCount} saved custom · ${ideAgentCount} native IDE agents · ${builtinCount} core) + **${retrieved.skills.length} skills** + **${matchedKb.length} Knowledge Cards**${rationale.length > 0 ? ` (${rationale.join("; ")})` : ""}.`,
+    `- **🛡️ Active Governance Guardrails**: Mandatory live web grounding with 20/60/20 search quotas + **Dynamic Shared Whiteboard ELECTRE+QMV Gate** (D >= 60%/65%, C >= 66.7%, R<=2 Early Stop) + \`[V1]\` 0.5% deterministic math reconciliation.`,
   ].join("\n");
 }

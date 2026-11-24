@@ -22,9 +22,17 @@
 
 ---
 
-## 10 秒快速挂载
+## 3 秒满血安装（自动装齐 MCP + 常驻护栏规则 + `/vetoboard` 技能）
 
-### Claude Code
+### ⭐ 推荐：一行命令全自动检测安装（支持 Antigravity / Claude Code / Cursor / Codex / Hermes）
+无需手改任何 JSON 配置文件，自动识别你电脑上已安装的智能体并一键配齐**「MCP 服务 + 护栏规则 + `/vetoboard` 快捷唤醒技能」三位一体完整包**：
+```bash
+npx -y vetoboard-mcp@latest init
+```
+
+### 手动仅挂载 MCP 配置
+
+#### Claude Code
 ```bash
 claude mcp add vetoboard -- npx -y vetoboard-mcp@latest --lang auto
 ```

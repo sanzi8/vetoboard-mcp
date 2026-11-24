@@ -11,6 +11,7 @@ import {
   auditToolSchemaForAllVendors,
   createVetoBoardMcpServer,
   discoverNativeSkills,
+  runHostInit,
   VetoBoardTaskStore,
 } from "../src/index.js";
 
@@ -504,10 +505,79 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(md).toContain("`GPT-OSS 120B (Medium)`(100%)");
     expect(md).toContain("`Gemini 3.8 Flash [Low/Med/High]`(35%)");
 
+    // Verify top Quick-Start callout sits ABOVE the 6-column lineup table for zero beginner friction!
+    expect(md.indexOf("⚡ **极速开跑")).toBeGreaterThan(0);
+    expect(md.indexOf("⚡ **极速开跑")).toBeLessThan(md.indexOf("| 拟上场席位 |"));
+
     // Verify retiring `3.8 Flash` and `Orchestrator` are NEVER recommended ahead of 4.x / 4.6 / GPT-OSS!
     for (const item of plan.recommendedLineup as Array<{ recommendedModelId: string }>) {
       expect(item.recommendedModelId).not.toContain("3.8-flash");
       expect(item.recommendedModelId).not.toContain("orchestrator");
     }
+  });
+
+  it("5. `vetoboard-mcp init` 1-Command Auto-Installer: configures full 3-in-1 bundle across Antigravity, Claude Code, Cursor, Codex & Hermes without clobbering existing configs", async () => {
+    const fakeHome = join(tempDir, "fake-init-home");
+    await mkdir(join(fakeHome, ".gemini", "config"), { recursive: true });
+    await mkdir(join(fakeHome, ".claude"), { recursive: true });
+    await mkdir(join(fakeHome, ".cursor"), { recursive: true });
+    await mkdir(join(fakeHome, ".codex"), { recursive: true });
+    await mkdir(join(fakeHome, ".hermes"), { recursive: true });
+
+    // Pre-seed existing user MCP configs to prove non-destructive merging!
+    await writeFile(
+      join(fakeHome, ".claude.json"),
+      JSON.stringify({ mcpServers: { github: { command: "npx", args: ["-y", "gh-mcp"] } }, theme: "dark" }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(fakeHome, ".hermes", "config.yaml"),
+      "model: deepseek-chat\nmcp_servers:\n  filesystem:\n    command: \"npx\"\n",
+      "utf8",
+    );
+
+    const initRes = await runHostInit({
+      homeDirOverride: fakeHome,
+      locale: "zh",
+      preferNpx: true,
+    });
+
+    expect(initRes.commandMode).toBe("npx");
+    expect(initRes.installed.map((i) => i.target).sort()).toEqual([
+      "antigravity",
+      "claude",
+      "codex",
+      "cursor",
+      "hermes",
+    ]);
+
+    // 1. Antigravity full 3-in-1 plugin bundle check
+    const agyRule = await readFile(
+      join(fakeHome, ".gemini", "config", "plugins", "vetoboard-mcp", "rules", "AGENTS.md"),
+      "utf8",
+    );
+    const agySkill = await readFile(
+      join(fakeHome, ".gemini", "config", "plugins", "vetoboard-mcp", "skills", "vetoboard", "SKILL.md"),
+      "utf8",
+    );
+    expect(agyRule).toContain("rawHostModelsJson");
+    expect(agyRule).toContain("markdownFilePath");
+    expect(agySkill).toContain("name: vetoboard");
+
+    // 2. Claude Code preserved `github` + `theme` while adding `vetoboard` MCP + `/vetoboard` slash command!
+    const claudeJson = JSON.parse(await readFile(join(fakeHome, ".claude.json"), "utf8"));
+    expect(claudeJson.theme).toBe("dark");
+    expect(claudeJson.mcpServers.github).toBeDefined();
+    expect(claudeJson.mcpServers.vetoboard.args).toContain("vetoboard-mcp@latest");
+    const claudeSlash = await readFile(join(fakeHome, ".claude", "commands", "vetoboard.md"), "utf8");
+    expect(claudeSlash).toContain("$ARGUMENTS");
+
+    // 3. Codex & Hermes configs preserved existing entries and added `vetoboard` idempotently!
+    const codexToml = await readFile(join(fakeHome, ".codex", "config.toml"), "utf8");
+    expect(codexToml).toContain("[mcp_servers.vetoboard]");
+    const hermesYaml = await readFile(join(fakeHome, ".hermes", "config.yaml"), "utf8");
+    expect(hermesYaml).toContain("model: deepseek-chat");
+    expect(hermesYaml).toContain("filesystem:");
+    expect(hermesYaml).toContain("vetoboard:");
   });
 });

@@ -5,6 +5,7 @@ import {
   previewOrSubmitAssetContribution,
   withdrawAssetContribution,
 } from "./core/assetContribution.js";
+import { runHostInit, type HostInstallTarget } from "./core/hostInstaller.js";
 import { renderDockerBuildProgress } from "./core/progressRenderer.js";
 import { runQuantitativeCalc } from "./core/quantitativeCalc.js";
 import { createStarterAssetPack } from "./core/roleCatalog.js";
@@ -49,6 +50,37 @@ async function main(): Promise<void> {
   const langFlag = parseFlag(args, "--lang") as "auto" | "en" | "zh" | undefined;
   const dataDirFlag = parseFlag(args, "--data-dir");
   const store = new VetoBoardTaskStore(dataDirFlag);
+
+  if (subcommand === "init" || subcommand === "install") {
+    const validTargets = new Set<HostInstallTarget>([
+      "antigravity",
+      "claude",
+      "cursor",
+      "codex",
+      "hermes",
+      "workspace",
+    ]);
+    const targetsRaw = parseFlag(args, "--targets") ?? parseFlag(args, "--target");
+    const parsedTargets = targetsRaw
+      ? targetsRaw
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter((s): s is HostInstallTarget => validTargets.has(s as HostInstallTarget))
+      : args.includes("--workspace")
+        ? (["workspace"] as const)
+        : undefined;
+
+    const res = await runHostInit({
+      homeDirOverride: parseFlag(args, "--home-dir"),
+      locale: resolveLocale(langFlag ?? "auto", "中文"),
+      preferLocalBin: args.includes("--local-bin"),
+      preferNpx: args.includes("--npx"),
+      targets: parsedTargets,
+      workspaceDir: parseFlag(args, "--workspace-dir"),
+    });
+    process.stdout.write(`${res.markdown}\n`);
+    return;
+  }
 
   if (subcommand === "serve") {
     const portStr = parseFlag(args, "--port");

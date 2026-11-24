@@ -41,6 +41,7 @@ export interface DiscoveredSkill {
 }
 
 const INTERNAL_META_SKILLS = new Set([
+  "vetoboard",
   "vetoboard-council",
   "swarm_monitor",
   "swarm_narrator",

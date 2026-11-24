@@ -20,9 +20,17 @@
 
 ---
 
-## Quickstart (Local `npx` or Remote `Streamable HTTP`)
+## Quickstart (3-Second Full-Bundle Installer or Manual Config)
 
-### Claude Code
+### ⭐ Recommended: 1-Command Auto-Installer (Antigravity / Claude Code / Cursor / Codex / Hermes)
+Automatically detects your installed coding agents and configures the **complete 3-in-1 bundle** (MCP Server + Always-On Guardrail Rules + `/vetoboard` Skill/Slash Command) with zero manual JSON editing:
+```bash
+npx -y vetoboard-mcp@latest init
+```
+
+### Manual MCP-Only Setup
+
+#### Claude Code
 ```bash
 claude mcp add vetoboard -- npx -y vetoboard-mcp@latest --lang auto
 ```
