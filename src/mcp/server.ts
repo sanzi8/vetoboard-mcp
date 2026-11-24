@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
@@ -1335,6 +1337,10 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .optional()
           .describe("For stage='board_review': 'approve' (irrelevant/beneficial/absorbed), 'conditional' (self-adapted), or 'oppose' (contention)."),
         durationMs: z.number().nonnegative().optional(),
+        executiveBriefingFilePath: z
+          .string()
+          .optional()
+          .describe("Optional UTF-8 file path to executiveBriefingMarkdown written on disk by an inspector worker."),
         executiveBriefingMarkdown: z.string().optional(),
         hardVetoEvidence: z
           .string()
@@ -1343,7 +1349,14 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         invokedSkills: z.array(z.string()).optional(),
         invokedTools: z.array(z.string()).optional(),
         keyConstraints: z.array(z.string()).optional(),
-        markdown: z.string().min(1),
+        markdown: z
+          .string()
+          .optional()
+          .describe("Track output Markdown (required unless markdownFilePath is provided)."),
+        markdownFilePath: z
+          .string()
+          .optional()
+          .describe("UTF-8 Markdown file path written by a MCP-less worker (e.g. Swarm worker) so Coordinator submits with zero copy-paste tokens."),
         neededDimensions: z
           .array(z.string())
           .optional()
@@ -1386,6 +1399,38 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       const roleTpl = findRoleTemplate(targetTrack.roleId);
       const now = new Date().toISOString();
 
+      let resolvedMarkdown = args.markdown?.trim() ?? "";
+      if (!resolvedMarkdown && args.markdownFilePath?.trim()) {
+        try {
+          resolvedMarkdown = (await readFile(resolve(args.markdownFilePath.trim()), "utf8")).trim();
+        } catch (err) {
+          return textResult(
+            `Failed to read markdownFilePath "${args.markdownFilePath}": ${err instanceof Error ? err.message : String(err)}`,
+            true,
+          );
+        }
+      }
+      if (!resolvedMarkdown) {
+        return textResult(
+          "Either non-empty `markdown` or readable `markdownFilePath` must be provided to `vetoboard_submit_track_output`.",
+          true,
+        );
+      }
+
+      let resolvedBriefingMd = args.executiveBriefingMarkdown?.trim();
+      if (!resolvedBriefingMd && args.executiveBriefingFilePath?.trim()) {
+        try {
+          resolvedBriefingMd = (
+            await readFile(resolve(args.executiveBriefingFilePath.trim()), "utf8")
+          ).trim();
+        } catch (err) {
+          return textResult(
+            `Failed to read executiveBriefingFilePath "${args.executiveBriefingFilePath}": ${err instanceof Error ? err.message : String(err)}`,
+            true,
+          );
+        }
+      }
+
       // Stage W1: Dynamic Shared Whiteboard Concurrent Post (`stage === "board_post"`)
       if (args.stage === "board_post") {
         // Universal Web-Grounding Gate: BEFORE locking assumptions onto the Shared Whiteboard,
@@ -1395,7 +1440,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           roleId: targetTrack.roleId,
           tier: "board_prep",
         });
-        const postCorpus = `${args.markdown}\n${Object.values(args.variables ?? {}).join("\n")}`;
+        const postCorpus = `${resolvedMarkdown}\n${Object.values(args.variables ?? {}).join("\n")}`;
         const postUrls = extractVerifiedHttpUrls(postCorpus);
         const postWebGrounded =
           hasInvokedWebResearchTool(args.invokedTools) || postUrls.length >= 1;
@@ -1425,11 +1470,11 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           (tItem) => tItem.roleId !== "quality-inspector" && tItem.status !== "skipped",
         );
         const prevEntry = task.whiteboardEntries.find((e) => e.trackId === targetTrack.trackId);
-        const extractedVars = extractWhiteboardVariables(args.markdown, args.variables);
+        const extractedVars = extractWhiteboardVariables(resolvedMarkdown, args.variables);
         const mergedVars = { ...(prevEntry?.variables ?? {}), ...extractedVars };
         const summaryClean =
           args.summaryLine?.trim() ||
-          args.markdown
+          resolvedMarkdown
             .replace(/```[\s\S]*?```/g, "")
             .split(/\r?\n/)
             .map((l) => l.replace(/^#+\s*/, "").replace(/^[-*+]\s+/, "").trim())
@@ -1507,16 +1552,16 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
             : args.stance === "caution"
               ? "conditional"
               : "approve");
-        const neededDims = inferNeededDimensions(args.markdown, args.neededDimensions);
+        const neededDims = inferNeededDimensions(resolvedMarkdown, args.neededDimensions);
         const hardVeto =
           args.hardVetoEvidence?.trim() ||
-          (args.altersCorePremise ? `altersCorePremise: ${args.markdown.slice(0, 140)}` : undefined);
+          (args.altersCorePremise ? `altersCorePremise: ${resolvedMarkdown.slice(0, 140)}` : undefined);
 
         const newReaction = {
           decision,
           ...(hardVeto ? { hardVetoEvidence: hardVeto } : {}),
           neededDimensions: neededDims,
-          note: args.markdown.replace(/\s+/g, " ").trim().slice(0, 220),
+          note: resolvedMarkdown.replace(/\s+/g, " ").trim().slice(0, 220),
           reviewerLabel: targetTrack.roleLabel,
           reviewerRoleId: targetTrack.roleId,
           reviewerTrackId: targetTrack.trackId,
@@ -1621,7 +1666,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           altersCorePremise: args.altersCorePremise,
           constructiveAlternative: args.constructiveAlternative,
           keyConstraints: args.keyConstraints,
-          markdown: args.markdown,
+          markdown: resolvedMarkdown,
           replyTo: args.replyTo,
           stance: args.stance,
         });
@@ -1714,7 +1759,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
 
       // Stage B: Full Deliverable Submission (`stage === "deliverable"`)
       const prevDraft = await store.readTrackArtifact(task.taskId, targetTrack.trackId);
-      const safeMarkdown = preserveBaselineOnIncrementalPatch(args.markdown, prevDraft, locale);
+      const safeMarkdown = preserveBaselineOnIncrementalPatch(resolvedMarkdown, prevDraft, locale);
       const savedPath = await store.writeTrackArtifact(task.taskId, targetTrack.trackId, safeMarkdown);
 
       const gateTools = task.allowOfflineAssumptions
@@ -1879,7 +1924,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           : undefined;
         const totalCatches = activeTracks.reduce((acc, tr) => acc + tr.catches.length, 0);
         const briefingBody =
-          args.executiveBriefingMarkdown?.trim() ||
+          resolvedBriefingMd ||
           buildAutoExecutiveBriefing({
             deliverables,
             goal: task.goal,
@@ -1926,6 +1971,13 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           goal: task.goal,
           ...(task.workspaceDir ? { workspaceDir: task.workspaceDir } : {}),
         });
+        // Auto-clean temporary worker file-drop folder `<workspaceDir>/.vetoboard-tmp/<taskId>` if used
+        if (task.workspaceDir) {
+          await rm(join(resolve(task.workspaceDir), ".vetoboard-tmp", task.taskId), {
+            force: true,
+            recursive: true,
+          }).catch(() => undefined);
+        }
         const primaryReportPath = written.workspaceReportPath ?? written.reportPath;
         const primaryBriefingPath = written.workspaceBriefingPath ?? written.briefingPath;
         const primaryOriginalPath = written.workspaceOriginalPath ?? written.originalPath;

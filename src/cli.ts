@@ -6,6 +6,7 @@ import {
   withdrawAssetContribution,
 } from "./core/assetContribution.js";
 import { renderDockerBuildProgress } from "./core/progressRenderer.js";
+import { runQuantitativeCalc } from "./core/quantitativeCalc.js";
 import { createStarterAssetPack } from "./core/roleCatalog.js";
 import { runSelfUpdate } from "./core/selfUpdater.js";
 import { distillStandardizedSkill, type DistillExportTarget } from "./core/skillDistiller.js";
@@ -76,6 +77,42 @@ async function main(): Promise<void> {
 
   if (subcommand === "export-starter-pack") {
     process.stdout.write(`${JSON.stringify(createStarterAssetPack(), null, 2)}\n`);
+    return;
+  }
+
+  if (subcommand === "calc") {
+    const jsonArg = parseFlag(args, "--json") ?? args[1];
+    if (!jsonArg || jsonArg.startsWith("--")) {
+      process.stderr.write(
+        "Usage: vetoboard-mcp calc '<json-payload>' [--task-id=vb_...] [--data-dir=...]\n",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const parsed = JSON.parse(jsonArg) as Record<string, unknown>;
+    const locale = resolveLocale(
+      (typeof parsed.lang === "string" ? (parsed.lang as "auto" | "en" | "zh") : langFlag) ?? "auto",
+      JSON.stringify(parsed),
+    );
+    const res = runQuantitativeCalc(
+      parsed as unknown as Parameters<typeof runQuantitativeCalc>[0],
+      locale,
+    );
+    const taskId = parseFlag(args, "--task-id") ?? (typeof parsed.taskId === "string" ? parsed.taskId : undefined);
+    if (taskId && res.ok) {
+      await store.mutateTaskSerial(taskId, async () => {
+        const existing = await store.getTask(taskId);
+        if (!existing) return;
+        const delta = Array.isArray(parsed.checks) ? parsed.checks.length : 1;
+        await store.saveTask({
+          ...existing,
+          calcChecksVerifiedCount: (existing.calcChecksVerifiedCount ?? 0) + delta,
+          updatedAt: new Date().toISOString(),
+        });
+      }).catch(() => undefined);
+    }
+    process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
+    if (!res.ok) process.exitCode = 1;
     return;
   }
 

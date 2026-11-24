@@ -1926,11 +1926,36 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       const taskId = /watch\s+(vb_[a-z0-9_]+)/i.exec(startOut)![1]!;
       const task = (await store.getTask(taskId))!;
 
+      // Simulate a MCP-less Swarm worker: run deterministic CLI `calc` + drop deliverable Markdown on disk for Coordinator `markdownFilePath` zero-copy submission!
+      const cliEntry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+      const { stdout: cliCalcStdout } = await execFileAsync(process.execPath, [
+        cliEntry,
+        "calc",
+        JSON.stringify({
+          fixedCostAnnual: 36_000,
+          mode: "unit_economics",
+          unitCogs: 120,
+          unitPrice: 450,
+          variableRatePct: 10,
+        }),
+        `--task-id=${taskId}`,
+        `--data-dir=${tempDir}`,
+      ]);
+      expect(JSON.parse(cliCalcStdout).ok).toBe(true);
+
+      const workerDropDir = join(wsDir, ".vetoboard-tmp", taskId);
+      await mkdir(workerDropDir, { recursive: true });
+      const workerMdFile = join(workerDropDir, `${task.tracks[0]!.trackId}.md`);
+      await writeFile(
+        workerMdFile,
+        "# 单位经济与三档维修定价核验\n### 呈批摘要卡\n- 低端水浴锅重置价 480 元（免修转拆件），中端移液器重置价 1800 元（维修客单 450 元），高端真空泵重置价 9800 元（维修客单 2200 元），综合盈亏平衡点 BEP = 18 单/月，见 https://example.org/lab-equip-2026 。",
+        "utf8",
+      );
+
       await client.callTool({
         arguments: {
           invokedTools: ["search_web", "vetoboard_calc"],
-          markdown:
-            "# 单位经济与三档维修定价核验\n### 呈批摘要卡\n- 低端水浴锅重置价 480 元（免修转拆件），中端移液器重置价 1800 元（维修客单 450 元），高端真空泵重置价 9800 元（维修客单 2200 元），综合盈亏平衡点 BEP = 18 单/月，见 https://example.org/lab-equip-2026 。",
+          markdownFilePath: workerMdFile,
           taskId,
           trackId: task.tracks[0]!.trackId,
         },
@@ -1949,6 +1974,9 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
           name: "vetoboard_submit_track_output",
         }),
       );
+
+      // Verify `.vetoboard-tmp/<taskId>` was auto-cleaned after final report export
+      await expect(readdir(workerDropDir)).rejects.toThrow();
 
       // Verify Post-Task Asset Export & Community Contribution Menu + 24h Update Banner
       expect(finalOut).toContain("🎁 实战资产沉淀与社区共享菜单");
