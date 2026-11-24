@@ -192,8 +192,8 @@ export function buildDivergeConvergeClarification(params: {
                 optionId: "budget_ultra_lean",
               },
               {
-                description: "可承受 1~5 万元小规模样机/渠道试错，接受 1~3 个月验证期",
-                label: "小额试错（1~5万元），接受 1~3 个月打磨验证",
+                description: "可承受 1–5 万元小规模样机/渠道试错，接受 1–3 个月验证期",
+                label: "小额试错（1–5万元），接受 1–3 个月打磨验证",
                 optionId: "budget_moderate",
               },
               {

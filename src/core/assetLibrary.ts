@@ -616,9 +616,7 @@ export function renderConversationalPreflightBriefing(params: {
     return [
       "### 🛠️ VetoBoard 战前检索与推荐阵容准备单",
       "",
-      "> ⚡ **极速开跑（零表单 · 直接说人话即可）**：",
-      "> - **认可推荐阵容**：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
-      "> - **自由换模型 / 改分数 / 临时加人**：直接回复如 **「精算用 Opus，督察用 Carbon，再加一个财务与人效 ROI 专员，开跑」**。",
+      "> ⚡ **极速开跑**：认可下方推荐直接回 **「开跑」**，或按最底部示例直接对话换模型 / 调权重 / 加角色。",
       "",
       "| 拟上场席位 | 资产来源 | 自动挂载技能 | 推荐运行模型（可改） | 推荐定位 & 权重分 | 为什么推荐这个分数？（定权依据） |",
       "| :--- | :--- | :--- | :--- | :--- | :--- |",
@@ -635,16 +633,18 @@ export function renderConversationalPreflightBriefing(params: {
       "",
       "---",
       `- **📚 三大复用资产库检索完成**：共命中 **${retrieved.roles.length} 个可复用角色**（已沉淀自定义库 \`${savedLibCount}\` 个 · 本机 Agent \`${ideAgentCount}\` 个 · 标准角色 \`${builtinCount}\` 个）+ **${retrieved.skills.length} 个可复用技能包** + **${matchedKb.length} 条历史实战知识卡**${rationale.length > 0 ? `（${rationale.join("；")}）` : ""}。`,
-      `- **🛡️ 已激活底座硬门禁**：全课题先联网实证（白板 ≤5~8 次 / 定稿 ≤12~18 次配额封顶，2 次无果标 \`【待确认】\` 止损） + **动态共享白板 ELECTRE+QMV 数学裁决**（D ≥ 60%/65% · C ≥ 66.7% · R≤2 早停） + \`[V1]\` 0.5% 容差独立核账。`,
+      `- **🛡️ 已激活底座硬门禁**：全课题先联网实证（白板 ≤5–8 次 / 定稿 ≤12–18 次配额封顶，2 次无果标 \`【待确认】\` 止损） + **动态共享白板 ELECTRE+QMV 数学裁决**（D ≥ 60%/65% · C ≥ 66.7% · R≤2 早停） + \`[V1]\` 0.5% 容差独立核账。`,
+      "",
+      "> 💬 **请确认或直接对话选模型 / 调权重**：",
+      "> - 认可上述推荐与模型搭配：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
+      "> - **想自由换模型 / 改分数 / 加自定义或技能角色**：直接用自然语言说即可（例如：**「精算用 Claude Opus，市场用 Gemini 4 Carbon，督察用 GPT-OSS 120B，工程降到 55 分，再加一个财务人效 ROI 专员，开跑」** 或 **「精算用 opus，工程用 haiku」**）。",
     ].join("\n");
   }
 
   return [
     "### 🛠️ VetoBoard Pre-Flight Library Retrieval & Recommended Lineup",
     "",
-    "> ⚡ **Quick Start (Plain Language · Zero Forms)**:",
-    "> - **Accept defaults**: Reply **\"Go\"** (or **\"Run only #1 and #2\"**);",
-    "> - **Customize freely**: Reply naturally (e.g. **\"Use opus for profit-modeler, add an ROI efficiency specialist, and go\"**).",
+    "> ⚡ **Quick Start**: Reply **\"Go\"** to accept the lineup below, or customize models/weights/roles in plain language.",
     "",
     "| Proposed Seat | Asset Origin | Mounted Skills | Recommended Model (Editable) | Tier & Score | Why This Score? |",
     "| :--- | :--- | :--- | :--- | :--- | :--- |",
@@ -662,5 +662,9 @@ export function renderConversationalPreflightBriefing(params: {
     "---",
     `- **📚 3-Pillar Asset Library Scan**: Retrieved **${retrieved.roles.length} reusable roles** (${savedLibCount} saved custom · ${ideAgentCount} native IDE agents · ${builtinCount} core) + **${retrieved.skills.length} skills** + **${matchedKb.length} Knowledge Cards**${rationale.length > 0 ? ` (${rationale.join("; ")})` : ""}.`,
     `- **🛡️ Active Governance Guardrails**: Mandatory live web grounding with 20/60/20 search quotas + **Dynamic Shared Whiteboard ELECTRE+QMV Gate** (D >= 60%/65%, C >= 66.7%, R<=2 Early Stop) + \`[V1]\` 0.5% deterministic math reconciliation.`,
+    "",
+    "> 💬 **Confirm or Pick Models / Weights in Plain Language**:",
+    "> - Reply **\"Go\"** (or **\"Run only #1 and #2\"**);",
+    "> - Or customize models, scores & roles naturally (e.g. **\"Use opus for profit-modeler, add an ROI efficiency specialist, and set legal-advisor to 98\"**).",
   ].join("\n");
 }

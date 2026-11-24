@@ -505,9 +505,14 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(md).toContain("`GPT-OSS 120B (Medium)`(100%)");
     expect(md).toContain("`Gemini 3.8 Flash [Low/Med/High]`(35%)");
 
-    // Verify top Quick-Start callout sits ABOVE the 6-column lineup table for zero beginner friction!
+    // Verify BOTH top Quick-Start guide AND bottom Model/Weight Confirmation prompt exist (and zero `~...~` GFM strikethrough bug)!
     expect(md.indexOf("⚡ **极速开跑")).toBeGreaterThan(0);
     expect(md.indexOf("⚡ **极速开跑")).toBeLessThan(md.indexOf("| 拟上场席位 |"));
+    expect(md.indexOf("💬 **请确认或直接对话选模型 / 调权重**")).toBeGreaterThan(
+      md.indexOf("🛡️ 已激活底座硬门禁"),
+    );
+    expect(md).toContain("白板 ≤5–8 次 / 定稿 ≤12–18 次");
+    expect(md).not.toMatch(/\d~\d.*\d~\d/);
 
     // Verify retiring `3.8 Flash` and `Orchestrator` are NEVER recommended ahead of 4.x / 4.6 / GPT-OSS!
     for (const item of plan.recommendedLineup as Array<{ recommendedModelId: string }>) {
