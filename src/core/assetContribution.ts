@@ -11,6 +11,7 @@ import { discoverNativeSkills } from "./skillRadar.js";
 import {
   contributionReceiptSchema,
   roleTemplateSchema,
+  vetoboardAssetPackSchema,
   type ContributionReceipt,
   type RoleTemplate,
 } from "./types.js";
@@ -57,16 +58,16 @@ export function sanitizeTextForPublicContribution(raw: string): SanitizeResult {
     /\bBearer\s+[A-Za-z0-9._-]{16,}\b/gi,
     "Bearer [REDACTED_TOKEN]",
   );
-  // 2. File URIs & Windows / Unix local user paths
+  // 2. File URIs & Windows / Unix local user paths (both raw `C:\...` and JSON-escaped `C:\\...`)
   text = replaceAndCount(text, /\bfile:\/\/\/[^\s"'`)>\]]+/gi, "[REDACTED_LOCAL_PATH]");
   text = replaceAndCount(
     text,
-    /\b[A-Za-z]:\\(?:Users|Documents|Projects|Repos|workspace|temp|tmp)\\[^\s"'`)>\]]*/gi,
+    /\b[A-Za-z]:\\\\?(?:Users|Documents|Projects|Repos|workspace|temp|tmp)\\\\?[^\s"'`)>\]]*/gi,
     "[REDACTED_LOCAL_PATH]",
   );
   text = replaceAndCount(
     text,
-    /\b[A-Za-z]:\\[^\s"'`)>\]]{4,}/g,
+    /\b[A-Za-z]:\\\\?[^\s"'`)>\]]{4,}/g,
     "[REDACTED_LOCAL_PATH]",
   );
   text = replaceAndCount(
@@ -109,7 +110,7 @@ function buildGovernanceNoticeBlock(locale: VetoBoardLocale, submissionIdHint?: 
 }
 
 async function resolveTargetAssetPayload(params: {
-  readonly assetType: "role" | "skill";
+  readonly assetType: "role" | "skill" | "pack";
   readonly assetId: string;
   readonly dataRootDir: string;
   readonly workspaceDir?: string;
@@ -125,7 +126,41 @@ async function resolveTargetAssetPayload(params: {
   | { readonly ok: false; readonly error: string }
 > {
   const { assetType, assetId, dataRootDir, workspaceDir, locale } = params;
-  const cleanId = assetId.trim().toLowerCase();
+  const cleanId = assetId.trim().toLowerCase().replace(/\.vetoboard-pack\.json$/i, "");
+
+  if (assetType === "pack") {
+    const baseSlug = cleanId.replace(/^pack-/, "");
+    const candidateSlugs = Array.from(new Set([cleanId, baseSlug]));
+    const candidatePaths = candidateSlugs.flatMap((slug) => [
+      join(dataRootDir, "packs", `${slug}.vetoboard-pack.json`),
+      ...(workspaceDir ? [join(resolve(workspaceDir), `${slug}.vetoboard-pack.json`)] : []),
+    ]);
+    for (const p of candidatePaths) {
+      try {
+        const raw = await readFile(p, "utf8");
+        const scrubbed = sanitizeTextForPublicContribution(raw);
+        const parsed = vetoboardAssetPackSchema.safeParse(JSON.parse(scrubbed.sanitized));
+        if (parsed.success) {
+          return {
+            normalizedId: parsed.data.packId,
+            ok: true,
+            redactedCount: scrubbed.redactedCount,
+            serializedPayload: JSON.stringify(parsed.data, null, 2),
+            title: parsed.data.name[locale],
+          };
+        }
+      } catch {
+        // Check next candidate path
+      }
+    }
+    return {
+      error:
+        locale === "zh"
+          ? `未找到项目模板包 "${assetId}"（请先传 exportTargets: ["project-pack"] 调用 vetoboard_distill_skill 生成）。`
+          : `Project pack "${assetId}" not found.`,
+      ok: false,
+    };
+  }
 
   if (assetType === "role") {
     const retrieved = await retrieveReusableAssets({
@@ -226,7 +261,7 @@ function buildPrefilledGithubIssueUrl(params: {
 
 export async function previewOrSubmitAssetContribution(params: {
   readonly action: "preview" | "submit";
-  readonly assetType: "role" | "skill";
+  readonly assetType: "role" | "skill" | "pack";
   readonly assetId: string;
   readonly confirmedConsent?: boolean;
   readonly authorHandle?: string;
@@ -255,7 +290,9 @@ export async function previewOrSubmitAssetContribution(params: {
 
   // Enforce Two-Step Transparency Gate: NEVER submit unless `action === "submit" && confirmedConsent === true`!
   if (params.action === "preview" || params.confirmedConsent !== true) {
-    const codeLang = params.assetType === "role" ? "json" : "markdown";
+    const codeLang = params.assetType === "role" || params.assetType === "pack" ? "json" : "markdown";
+    const assetTypeZh =
+      params.assetType === "role" ? "角色" : params.assetType === "pack" ? "项目模板包" : "技能";
     const previewExcerpt =
       resolved.serializedPayload.length > 1_800
         ? `${resolved.serializedPayload.slice(0, 1_800)}\n...(共 ${resolved.serializedPayload.length} 字符)`
@@ -263,7 +300,7 @@ export async function previewOrSubmitAssetContribution(params: {
 
     const md = zh
       ? [
-          `## 📦 [CONTRIBUTION_CONSENT_REQUIRED] 标准化${params.assetType === "role" ? "角色" : "技能"}推送前脱敏预览单（方法 A · GitHub 投递）`,
+          `## 📦 [CONTRIBUTION_CONSENT_REQUIRED] 标准化${assetTypeZh}推送前脱敏预览单（方法 A · GitHub 投递）`,
           "",
           buildGovernanceNoticeBlock(locale),
           "",
@@ -303,7 +340,7 @@ export async function previewOrSubmitAssetContribution(params: {
   const contribDir = join(dataRoot, "contributions");
   await mkdir(contribDir, { recursive: true });
 
-  const codeLang = params.assetType === "role" ? "json" : "markdown";
+  const codeLang = params.assetType === "role" || params.assetType === "pack" ? "json" : "markdown";
   const issueTitle = `[Asset Contribution][${params.assetType}] ${resolved.normalizedId} (${submissionId})`;
   const issueBody = [
     `## VetoBoard Standardized Asset Contribution (\`${submissionId}\`)`,

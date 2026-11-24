@@ -11,6 +11,7 @@ export * from "./core/deliberationEngine.js";
 export * from "./core/whiteboardEngine.js";
 export * from "./core/skillDistiller.js";
 export * from "./core/assetContribution.js";
+export * from "./core/selfUpdater.js";
 export * from "./core/assetLibrary.js";
 export * from "./core/divergeClarify.js";
 export * from "./core/citedBriefing.js";

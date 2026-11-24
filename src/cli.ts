@@ -7,7 +7,8 @@ import {
 } from "./core/assetContribution.js";
 import { renderDockerBuildProgress } from "./core/progressRenderer.js";
 import { createStarterAssetPack } from "./core/roleCatalog.js";
-import { distillStandardizedSkill } from "./core/skillDistiller.js";
+import { runSelfUpdate } from "./core/selfUpdater.js";
+import { distillStandardizedSkill, type DistillExportTarget } from "./core/skillDistiller.js";
 import { VetoBoardTaskStore } from "./core/taskStore.js";
 import { resolveLocale } from "./i18n/locales.js";
 import { startVetoBoardHttpServer } from "./mcp/httpServer.js";
@@ -82,14 +83,25 @@ async function main(): Promise<void> {
     const taskId = args[1];
     const skillId = parseFlag(args, "--skill-id");
     const alsoCreateRole = args.includes("--also-role");
+    const syncToHostIde = args.includes("--sync-ide");
+    const targetsRaw = parseFlag(args, "--targets");
+    const validTargets = new Set<DistillExportTarget>(["skill", "role", "rule", "project-pack"]);
+    const exportTargets = targetsRaw
+      ? (targetsRaw
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s): s is DistillExportTarget => validTargets.has(s as DistillExportTarget)))
+      : undefined;
     const task = taskId && !taskId.startsWith("--") ? await store.getTask(taskId) : undefined;
     const locale = resolveLocale(langFlag ?? "auto", task?.goal ?? "中文");
     const res = await distillStandardizedSkill({
       alsoCreateRole,
       dataRootDir: store.rootDir,
+      exportTargets,
       locale,
       skillId,
       store,
+      syncToHostIde,
       task: task ?? undefined,
     });
     process.stdout.write(`${res.summaryMarkdown}\n`);
@@ -97,11 +109,12 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "contribute") {
-    const assetTypeArg = args[1] === "role" ? "role" : "skill";
+    const assetTypeArg =
+      args[1] === "role" ? "role" : args[1] === "pack" ? "pack" : "skill";
     const assetId = args[2] && !args[2].startsWith("--") ? args[2] : args[1];
     if (!assetId || assetId.startsWith("--")) {
       process.stderr.write(
-        "Usage: vetoboard-mcp contribute <role|skill> <assetId> [--confirm] [--gh] [--repo=owner/repo]\n",
+        "Usage: vetoboard-mcp contribute <role|skill|pack> <assetId> [--confirm] [--gh] [--repo=owner/repo]\n",
       );
       process.exitCode = 1;
       return;
@@ -110,12 +123,26 @@ async function main(): Promise<void> {
     const res = await previewOrSubmitAssetContribution({
       action: confirmed ? "submit" : "preview",
       assetId,
-      assetType: args[1] === "role" || args[1] === "skill" ? assetTypeArg : "skill",
+      assetType:
+        args[1] === "role" || args[1] === "skill" || args[1] === "pack" ? assetTypeArg : "skill",
       autoRunGhCli: args.includes("--gh"),
       confirmedConsent: confirmed,
       dataRootDir: store.rootDir,
       locale: resolveLocale(langFlag ?? "auto", "中文"),
       targetRepo: parseFlag(args, "--repo"),
+    });
+    process.stdout.write(`${res.markdown}\n`);
+    if (res.isError) process.exitCode = 1;
+    return;
+  }
+
+  if (subcommand === "update" || subcommand === "check-update") {
+    const res = await runSelfUpdate({
+      action: subcommand === "update" ? "apply" : "check",
+      dataRootDir: store.rootDir,
+      dryRun: args.includes("--dry-run"),
+      locale: resolveLocale(langFlag ?? "auto", "中文"),
+      repoDirOverride: parseFlag(args, "--repo-dir"),
     });
     process.stdout.write(`${res.markdown}\n`);
     if (res.isError) process.exitCode = 1;

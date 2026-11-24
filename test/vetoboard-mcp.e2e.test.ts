@@ -1,10 +1,13 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -41,7 +44,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     }
   });
 
-  it("registers all 12 MCP tools and handles English & auto-detected Chinese seamlessly", async () => {
+  it("registers all 13 MCP tools and handles English & auto-detected Chinese seamlessly", async () => {
     const listed = await client.listTools();
     const names = listed.tools.map((t) => t.name).sort();
     expect(names).toEqual([
@@ -53,6 +56,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       "vetoboard_distill_skill",
       "vetoboard_get_role_charter",
       "vetoboard_plan_lineup",
+      "vetoboard_self_update",
       "vetoboard_start_council",
       "vetoboard_submit_track_output",
       "vetoboard_task_status",
@@ -1880,5 +1884,225 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     const offlineReport = await readFile(join(offlineWs, offlineReportName), "utf8");
     expect(offlineReport).toContain("模型推算（Model-Derived");
     expect(offlineReport).not.toContain("已验证（Verified");
+  });
+
+  it("emits post-task asset menu + 24h update banner, distills multi-target assets (skill/role/rule/project-pack + IDE sync), previews pack contribution, and guards self-update against dirty git trees", async () => {
+    // 1. Spin up a local mock npm registry endpoint returning v9.9.0
+    const mockRegistry = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          description: "Multi-target asset distillation & faster whiteboard",
+          name: "vetoboard-mcp",
+          version: "9.9.0",
+        }),
+      );
+    });
+    await new Promise<void>((r) => mockRegistry.listen(0, "127.0.0.1", r));
+    const mockPort = (mockRegistry.address() as AddressInfo).port;
+    const mockUrl = `http://127.0.0.1:${mockPort}/vetoboard-mcp/latest`;
+    const prevEnvUrl = process.env.VETOBOARD_UPDATE_REGISTRY_URL;
+    process.env.VETOBOARD_UPDATE_REGISTRY_URL = mockUrl;
+
+    try {
+      const wsDir = join(tempDir, "post-task-flywheel-ws");
+      const startOut = firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            effortProfile: "fast",
+            executionMode: "host-subscription",
+            goal: "实验室故障设备环保回收与开源维修公益促销方案",
+            lang: "zh",
+            lineupConfirmed: true,
+            modelOverrides: { "profit-modeler": "claude-opus-4-6-thinking" },
+            roleIds: ["profit-modeler"],
+            topologyMode: "flat",
+            workspaceDir: wsDir,
+          },
+          name: "vetoboard_start_council",
+        }),
+      );
+      const taskId = /watch\s+(vb_[a-z0-9_]+)/i.exec(startOut)![1]!;
+      const task = (await store.getTask(taskId))!;
+
+      await client.callTool({
+        arguments: {
+          invokedTools: ["search_web", "vetoboard_calc"],
+          markdown:
+            "# 单位经济与三档维修定价核验\n### 呈批摘要卡\n- 低端水浴锅重置价 480 元（免修转拆件），中端移液器重置价 1800 元（维修客单 450 元），高端真空泵重置价 9800 元（维修客单 2200 元），综合盈亏平衡点 BEP = 18 单/月，见 https://example.org/lab-equip-2026 。",
+          taskId,
+          trackId: task.tracks[0]!.trackId,
+        },
+        name: "vetoboard_submit_track_output",
+      });
+
+      const finalOut = firstText(
+        await client.callTool({
+          arguments: {
+            invokedTools: ["vetoboard_calc"],
+            markdown:
+              "# 终局督察复算\n### 呈批摘要卡\n- 三档损益与单人物理产能利用率（68%）复算通过，见 https://example.org/audit-bench 。",
+            taskId,
+            trackId: task.tracks[1]!.trackId,
+          },
+          name: "vetoboard_submit_track_output",
+        }),
+      );
+
+      // Verify Post-Task Asset Export & Community Contribution Menu + 24h Update Banner
+      expect(finalOut).toContain("🎁 实战资产沉淀与社区共享菜单");
+      expect(finalOut).toContain("「存为技能」 / 「存为角色」 / 「存为全局规则」 / 「存为项目模板」");
+      expect(finalOut).toContain("「预览推送」");
+      expect(finalOut).toContain("发现新版本 `v9.9.0`");
+      expect(finalOut).toContain("「更新 VetoBoard」");
+
+      // Verify 24h cache file was persisted
+      const cacheJson = JSON.parse(await readFile(join(tempDir, "update-check.json"), "utf8"));
+      expect(cacheJson.latestVersion).toBe("9.9.0");
+
+      // 2. Multi-Target Distillation (`skill` + `role` + `rule` + `project-pack` + `syncToHostIde`)
+      const fakeIdeHome = join(tempDir, "fake-ide-home");
+      await mkdir(join(fakeIdeHome, ".gemini", "config"), { recursive: true });
+      await mkdir(join(fakeIdeHome, ".claude"), { recursive: true });
+
+      const distillMultiOut = firstText(
+        await client.callTool({
+          arguments: {
+            exportTargets: ["skill", "role", "rule", "project-pack"],
+            hostIdeRootOverride: fakeIdeHome,
+            pitfalls: [
+              "低端仪器新品 <500 元时拆检人工倒挂，必须引导转入环保拆件抵扣池（测试本地路径脱敏 C:\\Users\\bob\\private_lab\\notes.md）",
+            ],
+            scope: "user",
+            skillId: "lab-repair-triage-sop",
+            syncToHostIde: true,
+            taskId,
+            title: "实验室老旧仪器分档维修与环保拆件精算模板",
+          },
+          name: "vetoboard_distill_skill",
+        }),
+      );
+
+      expect(distillMultiOut).toContain("标准化技能提炼完成（`lab-repair-triage-sop`）");
+      expect(distillMultiOut).toContain(".vetoboard-pack.json");
+
+      // Verify synced IDE skill files, guardrail rule, role agent, and project pack JSON on disk
+      const geminiSkill = await readFile(
+        join(fakeIdeHome, ".gemini", "config", "skills", "lab-repair-triage-sop", "SKILL.md"),
+        "utf8",
+      );
+      const claudeSkill = await readFile(
+        join(fakeIdeHome, ".claude", "skills", "lab-repair-triage-sop", "SKILL.md"),
+        "utf8",
+      );
+      expect(geminiSkill).toContain("name: lab-repair-triage-sop");
+      expect(claudeSkill).toContain("name: lab-repair-triage-sop");
+
+      const ruleMd = await readFile(
+        join(tempDir, "library", "rules", "lab-repair-triage-sop.md"),
+        "utf8",
+      );
+      expect(ruleMd).toContain("<!-- vetoboard-rule:lab-repair-triage-sop:begin -->");
+
+      const packJson = JSON.parse(
+        await readFile(join(tempDir, "packs", "lab-repair-triage-sop.vetoboard-pack.json"), "utf8"),
+      );
+      expect(packJson.packId).toBe("pack-lab-repair-triage-sop");
+      expect(
+        packJson.roles.some(
+          (r: { roleId: string; modelBinding?: { modelId?: string } }) =>
+            r.roleId === "profit-modeler" && r.modelBinding?.modelId === "claude-opus-4-6-thinking",
+        ),
+      ).toBe(true);
+
+      // 3. Preview Method A contribution for `assetType: "pack"` (privacy-scrubbed + 3-point guarantee)
+      const packPreview = firstText(
+        await client.callTool({
+          arguments: {
+            action: "preview",
+            assetId: "pack-lab-repair-triage-sop",
+            assetType: "pack",
+            lang: "zh",
+          },
+          name: "vetoboard_contribute_asset",
+        }),
+      );
+      expect(packPreview).toContain("标准化项目模板包推送前脱敏预览单");
+      expect(packPreview).toContain("仅用于 VetoBoard 项目的升级、规则校准或体验优化");
+      expect(packPreview).toContain("100% 随时可撤回");
+      expect(packPreview).toContain("已自动扫描并剥离 **2** 处敏感路径/凭据/邮箱");
+      expect(packPreview).not.toContain("bob");
+
+      const packSubmit = firstText(
+        await client.callTool({
+          arguments: {
+            action: "submit",
+            assetId: "pack-lab-repair-triage-sop",
+            assetType: "pack",
+            confirmedConsent: true,
+            lang: "zh",
+          },
+          name: "vetoboard_contribute_asset",
+        }),
+      );
+      const packSubId = /(sub_[a-z0-9_]+)/i.exec(packSubmit)![1]!;
+      const packBundle = await readFile(
+        join(tempDir, "contributions", `${packSubId}-bundle.md`),
+        "utf8",
+      );
+      expect(packBundle).toContain("[REDACTED_LOCAL_PATH]");
+      expect(packBundle).not.toContain("bob");
+
+      // 4. Self-Updater (`vetoboard_self_update`): clean git repo dry-run passes; dirty tree safely aborts!
+      const fakeGitRepo = join(tempDir, "fake-git-install");
+      await mkdir(fakeGitRepo, { recursive: true });
+      await execFileAsync("git", ["init", fakeGitRepo]);
+      await execFileAsync("git", ["-C", fakeGitRepo, "config", "user.email", "test@example.org"]);
+      await execFileAsync("git", ["-C", fakeGitRepo, "config", "user.name", "Test Runner"]);
+      await writeFile(
+        join(fakeGitRepo, "package.json"),
+        JSON.stringify({ name: "vetoboard-mcp", version: "1.1.0" }, null, 2),
+        "utf8",
+      );
+      await execFileAsync("git", ["-C", fakeGitRepo, "add", "."]);
+      await execFileAsync("git", ["-C", fakeGitRepo, "commit", "-m", "init"]);
+
+      const cleanDryRun = await client.callTool({
+        arguments: {
+          action: "apply",
+          dryRun: true,
+          lang: "zh",
+          registryUrlOverride: mockUrl,
+          repoDirOverride: fakeGitRepo,
+        },
+        name: "vetoboard_self_update",
+      });
+      expect(cleanDryRun.isError).toBeFalsy();
+      expect(firstText(cleanDryRun)).toContain("Dry-Run 演练通过");
+
+      // Introduce uncommitted local edit -> must block auto-overwrite!
+      await writeFile(join(fakeGitRepo, "local-wip.txt"), "uncommitted", "utf8");
+      const dirtyApply = await client.callTool({
+        arguments: {
+          action: "apply",
+          dryRun: false,
+          lang: "zh",
+          registryUrlOverride: mockUrl,
+          repoDirOverride: fakeGitRepo,
+        },
+        name: "vetoboard_self_update",
+      });
+      expect(dirtyApply.isError).toBe(true);
+      expect(firstText(dirtyApply)).toContain("安全保护拦截");
+      expect(firstText(dirtyApply)).toContain("local-wip.txt");
+    } finally {
+      if (prevEnvUrl === undefined) {
+        delete process.env.VETOBOARD_UPDATE_REGISTRY_URL;
+      } else {
+        process.env.VETOBOARD_UPDATE_REGISTRY_URL = prevEnvUrl;
+      }
+      await new Promise<void>((r) => mockRegistry.close(() => r()));
+    }
   });
 });

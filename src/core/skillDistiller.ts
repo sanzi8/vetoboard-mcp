@@ -1,20 +1,28 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { VetoBoardLocale } from "../i18n/locales.js";
 import { persistRoleToLibrary } from "./assetLibrary.js";
+import { findRoleTemplate, formatModelBindingLabel } from "./roleCatalog.js";
 import { synthesizeRoleFromSkill, type DiscoveredSkill } from "./skillRadar.js";
 import type { VetoBoardTaskStore } from "./taskStore.js";
-import type { RoleTemplate, VetoBoardTaskRecord } from "./types.js";
+import {
+  vetoboardAssetPackSchema,
+  type RoleTemplate,
+  type VetoBoardAssetPack,
+  type VetoBoardTaskRecord,
+} from "./types.js";
 
 /**
- * Standardized Skill & Reusable Role Distiller (`skillDistiller.ts`).
- * Autonomously distills standardized `SKILL.md` & reusable role templates:
- * - Distills verified SOPs, Locked Whiteboard variables, `vetoboard_calc` verification checklists,
- *   and intercepted pitfalls from a Council Task (or structured inputs) into a standardized `SKILL.md`
- *   with clean YAML frontmatter (`name`, `description`).
- * - Optionally synthesizes & saves a companion standardized `RoleTemplate` JSON into `library/roles/`.
+ * Multi-Target Standardized Asset Distiller (`skillDistiller.ts`).
+ * Autonomously distills verified runs into ANY combination of 4 standardized cross-agent formats:
+ * 1. `"skill"` -> Standardized `SKILL.md` (`library/skills/` or `<workspace>/.agents/skills/` + optional Host IDE `~/.gemini`/`~/.claude`/`~/.codex` sync)
+ * 2. `"role"` -> Standardized `RoleTemplate` JSON (`library/roles/`) + Cross-IDE Markdown Subagent `.md`
+ * 3. `"rule"` -> Idempotent Global or Workspace Guardrail Rule (`.agents/rules/<id>.md`, `library/rules/<id>.md`, or custom `AGENTS.md`/`GEMINI.md`/`CLAUDE.md`)
+ * 4. `"project-pack"` -> Full Reusable Project Council Template (`.vetoboard-pack.json` preserving lineup, weights, `modelBinding`, rules & whiteboard baseline!)
  */
+
+export type DistillExportTarget = "skill" | "role" | "rule" | "project-pack";
 
 export interface DistillStandardizedSkillInput {
   readonly dataRootDir?: string;
@@ -31,16 +39,24 @@ export interface DistillStandardizedSkillInput {
   readonly pitfalls?: readonly string[];
   readonly mustUseTools?: readonly string[];
   readonly alsoCreateRole?: boolean;
+  readonly exportTargets?: readonly DistillExportTarget[];
+  readonly syncToHostIde?: boolean;
+  readonly hostIdeRootOverride?: string;
+  readonly customRuleFilePath?: string;
   readonly roleWeight?: number;
 }
 
 export interface DistillStandardizedSkillResult {
   readonly skillId: string;
-  readonly skillFilePath: string;
+  readonly skillFilePath?: string;
+  readonly syncedIdeSkillPaths?: readonly string[];
   readonly skillMarkdown: string;
   readonly roleId?: string;
   readonly roleFilePath?: string;
+  readonly nativeAgentFilePath?: string;
   readonly roleTemplate?: RoleTemplate;
+  readonly ruleFilePath?: string;
+  readonly packFilePath?: string;
   readonly summaryMarkdown: string;
 }
 
@@ -50,7 +66,6 @@ function slugifySkillId(raw: string): string {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (ascii.length >= 3) return ascii.slice(0, 48);
-  // Deterministic hash suffix when input is pure CJK
   let hash = 0;
   for (let i = 0; i < raw.length; i++) {
     hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
@@ -76,14 +91,65 @@ function extractBulletsFromArtifacts(texts: readonly string[], maxItems = 6): st
   return out;
 }
 
+async function dirExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function upsertMarkedRuleSection(
+  filePath: string,
+  ruleId: string,
+  sectionMarkdown: string,
+): Promise<void> {
+  await mkdir(dirname(filePath), { recursive: true });
+  const beginMarker = `<!-- vetoboard-rule:${ruleId}:begin -->`;
+  const endMarker = `<!-- vetoboard-rule:${ruleId}:end -->`;
+  const wrapped = `${beginMarker}\n${sectionMarkdown.trim()}\n${endMarker}\n`;
+
+  let existing = "";
+  try {
+    existing = await readFile(filePath, "utf8");
+  } catch {
+    await writeFile(filePath, wrapped, "utf8");
+    return;
+  }
+
+  const startIdx = existing.indexOf(beginMarker);
+  const endIdx = existing.indexOf(endMarker);
+  if (startIdx >= 0 && endIdx > startIdx) {
+    const updated =
+      existing.slice(0, startIdx) +
+      wrapped.trim() +
+      existing.slice(endIdx + endMarker.length);
+    await writeFile(filePath, `${updated.trim()}\n`, "utf8");
+    return;
+  }
+  const sep = existing.endsWith("\n") ? "\n" : "\n\n";
+  await writeFile(filePath, `${existing}${sep}${wrapped}`, "utf8");
+}
+
 export async function distillStandardizedSkill(
   input: DistillStandardizedSkillInput,
 ): Promise<DistillStandardizedSkillResult> {
   const { locale, task, store } = input;
   const zh = locale === "zh";
   const home = homedir();
-  const dataRoot = resolve(input.dataRootDir ?? store?.rootDir ?? process.env.VETOBOARD_DATA_DIR ?? join(home, ".vetoboard-mcp"));
+  const dataRoot = resolve(
+    input.dataRootDir ?? store?.rootDir ?? process.env.VETOBOARD_DATA_DIR ?? join(home, ".vetoboard-mcp"),
+  );
   const scope = input.scope ?? "user";
+  const effectiveWs = input.workspaceDir?.trim() || task?.workspaceDir?.trim();
+
+  const targetSet = new Set<DistillExportTarget>(
+    input.exportTargets && input.exportTargets.length > 0 ? input.exportTargets : ["skill"],
+  );
+  if (input.alsoCreateRole) {
+    targetSet.add("role");
+  }
 
   const rawNameSource =
     input.skillId?.trim() ||
@@ -95,11 +161,10 @@ export async function distillStandardizedSkill(
     input.title?.trim() ||
     (task
       ? zh
-        ? `${task.goal.slice(0, 32)} · 标准化核验技能`
-        : `${task.goal.slice(0, 40)} Verification Skill`
+        ? `${task.goal.slice(0, 32)} · 标准化治理资产`
+        : `${task.goal.slice(0, 40)} Governance Asset`
       : skillId);
 
-  // Collect artifacts if distilling from a task
   const artifactTexts: string[] = [];
   if (task && store) {
     for (const tr of task.tracks) {
@@ -108,7 +173,7 @@ export async function distillStandardizedSkill(
     }
   }
 
-  // 1. SOP Steps (from explicit input OR Whiteboard variables + track summaries)
+  // 1. SOP Steps
   const sopSteps: string[] = [...(input.sopSteps ?? [])];
   if (sopSteps.length === 0 && task) {
     for (const e of task.whiteboardEntries) {
@@ -126,30 +191,31 @@ export async function distillStandardizedSkill(
   if (sopSteps.length === 0) {
     sopSteps.push(
       zh
-        ? "先锚定真实买单方、重置成本天花板与核心架构约束，再并发推进分项核算。"
-        : "Anchor real buyer budget, replacement-cost ceiling, and core interface contracts before parallel execution.",
+        ? "先联网核实三档真实具体型号现价与现行法规，锚定重置成本天花板后再并发推进核算。"
+        : "Verify live 3-tier SKU prices & statutory baselines via web search before parallel execution.",
     );
   }
 
   // 2. Verification Checklist
-  const mustTools = input.mustUseTools && input.mustUseTools.length > 0
-    ? [...input.mustUseTools]
-    : ["vetoboard_calc"];
+  const mustTools =
+    input.mustUseTools && input.mustUseTools.length > 0
+      ? [...input.mustUseTools]
+      : ["WebSearch", "vetoboard_calc"];
   const checklist: string[] = [...(input.verificationChecklist ?? [])];
   if (checklist.length === 0) {
     checklist.push(
       zh
-        ? `必调确定性工具 \`${mustTools.join(", ")}\`：严禁心算回本周期（BEP）、净毛利或加权评分，所有关键算式须经 \`mode='reconcile'\` 复算零偏差（<0.5%）。`
-        : `Invoke deterministic tool(s) \`${mustTools.join(", ")}\`: never mental-math BEP, net margin, or weighted scores; reconcile within <0.5% tolerance.`,
+        ? `必调确定性工具 \`${mustTools.join(", ")}\`：先联网抓一手链接，再用 \`vetoboard_calc (mode='reconcile')\` 独立复算三档损益与单人物理产能利用率（偏差 <0.5%）。`
+        : `Invoke \`${mustTools.join(", ")}\`: verify live primary URLs first, then reconcile tiered margins & physical capacity utilization (<0.5% tolerance).`,
     );
     checklist.push(
       zh
-        ? "严格隔离【已验证】客观信源与【待确认】假设项，禁止无出处编造行业均价或转化率。"
-        : "Strictly separate [VERIFIED] empirical sources from [ASSUMPTION] items.",
+        ? "严格标注四级结论状态（【已验证】/【模型推算】/【条件性建议】/【待确认】），禁止用单一平均值掩盖低端亏损黑洞。"
+        : "Tag every core claim with 4-tier readiness status and never mask low-end loss tiers behind a single average.",
     );
   }
 
-  // 3. Pitfalls & Guardrails (from task catches + minority dissent + explicit pitfalls)
+  // 3. Pitfalls & Guardrails
   const pitfalls: string[] = [...(input.pitfalls ?? [])];
   if (pitfalls.length === 0 && task) {
     for (const tr of task.tracks) {
@@ -166,8 +232,8 @@ export async function distillStandardizedSkill(
   if (pitfalls.length === 0) {
     pitfalls.push(
       zh
-        ? "严防漏算创始人机会成本、渠道综合税费（如 MoR / VAT）或过度工程化固定云成本。"
-        : "Guard against omitting founder opportunity cost, MoR/VAT fees, or over-engineered fixed infra cost.",
+        ? "严防漏算创始人机会成本、返修摊销、渠道综合税费或单人物理极限产能上限。"
+        : "Guard against omitting founder opportunity cost, rework amortization, channel fees, or solo physical capacity limits.",
     );
   }
 
@@ -228,22 +294,48 @@ export async function distillStandardizedSkill(
         "",
       ].join("\n");
 
-  const baseSkillsDir =
-    scope === "workspace" && (input.workspaceDir?.trim() || task?.workspaceDir?.trim())
-      ? join(resolve((input.workspaceDir ?? task!.workspaceDir)!), ".agents", "skills")
-      : join(dataRoot, "library", "skills");
+  let skillFilePath: string | undefined;
+  const syncedIdeSkillPaths: string[] = [];
 
-  const skillDir = join(baseSkillsDir, skillId);
-  await mkdir(skillDir, { recursive: true });
-  const skillFilePath = join(skillDir, "SKILL.md");
-  await writeFile(skillFilePath, skillMarkdown, "utf8");
+  // Target A: Standardized `SKILL.md`
+  if (targetSet.has("skill")) {
+    const baseSkillsDir =
+      scope === "workspace" && effectiveWs
+        ? join(resolve(effectiveWs), ".agents", "skills")
+        : join(dataRoot, "library", "skills");
 
+    const skillDir = join(baseSkillsDir, skillId);
+    await mkdir(skillDir, { recursive: true });
+    skillFilePath = join(skillDir, "SKILL.md");
+    await writeFile(skillFilePath, skillMarkdown, "utf8");
+
+    // Optional sync into native Host IDE global skill directories (`~/.gemini/config/skills`, `~/.claude/skills`, `~/.codex/skills`)
+    if (input.syncToHostIde && scope === "user") {
+      const hostBase = input.hostIdeRootOverride ? resolve(input.hostIdeRootOverride) : home;
+      const candidateIdeRoots = [
+        join(hostBase, ".gemini", "config"),
+        join(hostBase, ".claude"),
+        join(hostBase, ".codex"),
+      ];
+      for (const ideRoot of candidateIdeRoots) {
+        if (await dirExists(ideRoot)) {
+          const ideSkillFile = join(ideRoot, "skills", skillId, "SKILL.md");
+          await mkdir(dirname(ideSkillFile), { recursive: true });
+          await writeFile(ideSkillFile, skillMarkdown, "utf8");
+          syncedIdeSkillPaths.push(ideSkillFile);
+        }
+      }
+    }
+  }
+
+  // Target B: Standardized Reusable Role (`RoleTemplate` JSON + Cross-IDE Markdown Agent `.md`)
   let roleTemplate: RoleTemplate | undefined;
   let roleFilePath: string | undefined;
-  if (input.alsoCreateRole) {
+  let nativeAgentFilePath: string | undefined;
+  if (targetSet.has("role")) {
     const discoveredObj: DiscoveredSkill = {
       description: descriptionClean,
-      filePath: skillFilePath,
+      ...(skillFilePath ? { filePath: skillFilePath } : {}),
       inlineContent: skillMarkdown,
       name: skillId,
       skillId,
@@ -251,35 +343,190 @@ export async function distillStandardizedSkill(
     };
     roleTemplate = synthesizeRoleFromSkill(discoveredObj, locale, input.roleWeight ?? 90);
     roleFilePath = await persistRoleToLibrary(dataRoot, roleTemplate, [skillId]);
+
+    const agentMd = [
+      "---",
+      `name: ${roleTemplate.roleId}`,
+      `description: ${descriptionClean}`,
+      "---",
+      "",
+      roleTemplate.systemCharter[locale],
+      "",
+    ].join("\n");
+
+    const agentsDir =
+      scope === "workspace" && effectiveWs
+        ? join(resolve(effectiveWs), ".agents", "agents")
+        : input.syncToHostIde && input.hostIdeRootOverride
+          ? join(resolve(input.hostIdeRootOverride), ".gemini", "config", "agents")
+          : undefined;
+    if (agentsDir) {
+      await mkdir(agentsDir, { recursive: true });
+      nativeAgentFilePath = join(agentsDir, `${roleTemplate.roleId}.md`);
+      await writeFile(nativeAgentFilePath, agentMd, "utf8");
+    }
+  }
+
+  // Target C: Global or Workspace Guardrail Rule (`rule`)
+  let ruleFilePath: string | undefined;
+  if (targetSet.has("rule")) {
+    const ruleBody = zh
+      ? [
+          `## 🛡️ VetoBoard 实战提炼护栏规则：${displayTitle} (\`${skillId}\`)`,
+          ...checklist.map((c) => `- **硬核验要求**：${c}`),
+          ...pitfalls.slice(0, 6).map((p) => `- **避坑红线**：${p}`),
+        ].join("\n")
+      : [
+          `## 🛡️ VetoBoard Distilled Guardrail Rule: ${displayTitle} (\`${skillId}\`)`,
+          ...checklist.map((c) => `- **Verification Gate**: ${c}`),
+          ...pitfalls.slice(0, 6).map((p) => `- **Redline**: ${p}`),
+        ].join("\n");
+
+    ruleFilePath = input.customRuleFilePath?.trim()
+      ? resolve(input.customRuleFilePath)
+      : scope === "workspace" && effectiveWs
+        ? join(resolve(effectiveWs), ".agents", "rules", `${skillId}.md`)
+        : join(dataRoot, "library", "rules", `${skillId}.md`);
+    await upsertMarkedRuleSection(ruleFilePath, skillId, ruleBody);
+  }
+
+  // Target D: Reusable Project Council Pack Template (`project-pack` -> `.vetoboard-pack.json`)
+  let packFilePath: string | undefined;
+  if (targetSet.has("project-pack")) {
+    const packRoles: RoleTemplate[] = [];
+    if (task) {
+      for (const tr of task.tracks) {
+        if (tr.status === "skipped") continue;
+        const baseTpl = findRoleTemplate(tr.roleId);
+        const tpl: RoleTemplate = baseTpl
+          ? {
+              ...baseTpl,
+              ...(tr.modelBinding ? { modelBinding: tr.modelBinding } : {}),
+              weight: tr.weight,
+            }
+          : {
+              allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+              domain: task.domain,
+              evidenceRequirements: ["Live web verification + deterministic vetoboard_calc receipt"],
+              executableRules: tr.customRules ?? [],
+              kind: tr.roleId === "quality-inspector" ? "inspector" : "professional",
+              ...(tr.modelBinding ? { modelBinding: tr.modelBinding } : {}),
+              name: { en: tr.roleLabel, zh: tr.roleLabel },
+              priorityTier: tr.weight >= 92 ? "primary" : tr.weight >= 80 ? "guardrail" : "secondary",
+              readOnly: true,
+              roleId: tr.roleId,
+              systemCharter: {
+                en: tr.customCharter ?? tr.title,
+                zh: tr.customCharter ?? tr.title,
+              },
+              weight: tr.weight,
+            };
+        packRoles.push(tpl);
+      }
+    } else if (roleTemplate) {
+      packRoles.push(roleTemplate);
+    }
+
+    const modelSummary = task
+      ? task.tracks
+          .filter((tItem) => tItem.modelBinding)
+          .map((tItem) => `${tItem.roleId}=${formatModelBindingLabel(tItem.modelBinding)}`)
+          .join(", ")
+      : "";
+
+    const packObj: VetoBoardAssetPack = vetoboardAssetPackSchema.parse({
+      author: "Local Distilled Project Template",
+      description: {
+        en: `Reusable Project Council Template for "${displayTitle}"${modelSummary ? ` (Models: ${modelSummary})` : ""}`,
+        zh: `可一键复刻的项目委员会阵容与规则模板：「${displayTitle}」${modelSummary ? `（绑定模型：${modelSummary}）` : ""}`,
+      },
+      exportedAt: new Date().toISOString(),
+      format: "vetoboard-asset-pack",
+      name: {
+        en: `${displayTitle} Template Pack`,
+        zh: `${displayTitle} · 项目模板包`,
+      },
+      packId: `pack-${skillId}`,
+      roles: packRoles,
+      schemaVersion: 1,
+      skills: [
+        {
+          content: { en: skillMarkdown, zh: skillMarkdown },
+          skillId,
+          title: { en: displayTitle, zh: displayTitle },
+        },
+      ],
+    });
+
+    const packsDir =
+      scope === "workspace" && effectiveWs
+        ? resolve(effectiveWs)
+        : join(dataRoot, "packs");
+    await mkdir(packsDir, { recursive: true });
+    packFilePath = join(packsDir, `${skillId}.vetoboard-pack.json`);
+    await writeFile(packFilePath, `${JSON.stringify(packObj, null, 2)}\n`, "utf8");
+  }
+
+  const exportedLines: string[] = [];
+  if (skillFilePath) {
+    exportedLines.push(
+      zh
+        ? `- **标准技能 (\`SKILL.md\`) 已落盘**：\`${skillFilePath}\`（下次 \`vetoboard_plan_lineup\` 将自动检索命中！）`
+        : `- **Saved \`SKILL.md\`**: \`${skillFilePath}\``,
+    );
+  }
+  for (const ideP of syncedIdeSkillPaths) {
+    exportedLines.push(
+      zh ? `- **已同步挂载至宿主 IDE 全局技能目录**：\`${ideP}\`` : `- **Synced to Host IDE Skills**: \`${ideP}\``,
+    );
+  }
+  if (roleTemplate && roleFilePath) {
+    exportedLines.push(
+      zh
+        ? `- **配套标准化角色已落盘**：\`${roleTemplate.roleId}\` → \`${roleFilePath}\`${nativeAgentFilePath ? `（及原生 Agent \`${nativeAgentFilePath}\`）` : ""}`
+        : `- **Saved Standardized Role**: \`${roleTemplate.roleId}\` -> \`${roleFilePath}\``,
+    );
+  }
+  if (ruleFilePath) {
+    exportedLines.push(
+      zh
+        ? `- **防坑护栏规则 (\`Rule\`) 已写入**：\`${ruleFilePath}\``
+        : `- **Saved Guardrail Rule**: \`${ruleFilePath}\``,
+    );
+  }
+  if (packFilePath) {
+    exportedLines.push(
+      zh
+        ? `- **整套项目委员会阵容模板 (\`.vetoboard-pack.json\`) 已落盘**：\`${packFilePath}\`（含全员权重、模型绑定与技能契约，同类课题可直接整套复刻！）`
+        : `- **Saved Project Council Pack Template**: \`${packFilePath}\``,
+    );
   }
 
   const summaryMarkdown = zh
     ? [
         `## ✨ 标准化技能提炼完成（\`${skillId}\`）`,
-        `- **标准 \`SKILL.md\` 已落盘**：\`${skillFilePath}\`（下次 \`vetoboard_plan_lineup\` 将自动检索命中！）`,
-        ...(roleTemplate && roleFilePath
-          ? [`- **配套标准化角色已同步落盘**：\`${roleTemplate.roleId}\` → \`${roleFilePath}\``]
-          : []),
-        `- **包含模块**：YAML 标准头 + ${sopSteps.length} 步 SOP + ${checklist.length} 项核验清单 + ${pitfalls.length} 条实战防坑红线。`,
+        ...exportedLines,
+        `- **提炼要素**：${sopSteps.length} 步 SOP + ${checklist.length} 项确定性核验清单 + ${pitfalls.length} 条实战避坑红线。`,
         "",
-        `> 💡 **可选社区共享（方法 A）**：若您愿意将该标准化技能/角色回馈官方库，可调用 \`vetoboard_contribute_asset\` 先查看脱敏预览单（收录进库后**仅用于项目升级或体验优化，且支持凭单号随时撤回**）。`,
+        `> 💡 **可选社区共享（方法 A）**：若您愿意将该资产回馈官方库，只需回复 **「预览推送」**（调用 \`vetoboard_contribute_asset\`），系统会先展示本地脱敏预览单（收录进库后**仅用于项目升级或体验优化，且凭单号 100% 随时可撤回**）。`,
       ].join("\n")
     : [
-        `## ✨ Standardized Skill Distilled (\`${skillId}\`)`,
-        `- **Saved \`SKILL.md\`**: \`${skillFilePath}\` (auto-discoverable in future \`vetoboard_plan_lineup\` runs!)`,
-        ...(roleTemplate && roleFilePath
-          ? [`- **Companion Standardized Role Saved**: \`${roleTemplate.roleId}\` -> \`${roleFilePath}\``]
-          : []),
+        `## ✨ Standardized Assets Saved (\`${skillId}\`)`,
+        ...exportedLines,
         "",
-        `> 💡 **Optional Community Contribution (Method A)**: Call \`vetoboard_contribute_asset\` to preview sanitized sharing (stored in library **solely for project upgrades/optimization, and withdrawable anytime**).`,
+        `> 💡 **Optional Community Contribution (Method A)**: Reply **"Preview contribution"** (\`vetoboard_contribute_asset\`) to inspect the privacy-scrubbed payload (stored in library **solely for project upgrades/optimization, and withdrawable anytime**).`,
       ].join("\n");
 
   return {
+    ...(nativeAgentFilePath ? { nativeAgentFilePath } : {}),
+    ...(packFilePath ? { packFilePath } : {}),
     ...(roleFilePath ? { roleFilePath } : {}),
     ...(roleTemplate ? { roleId: roleTemplate.roleId, roleTemplate } : {}),
-    skillFilePath,
+    ...(ruleFilePath ? { ruleFilePath } : {}),
+    ...(skillFilePath ? { skillFilePath } : {}),
     skillId,
     skillMarkdown,
     summaryMarkdown,
+    ...(syncedIdeSkillPaths.length > 0 ? { syncedIdeSkillPaths } : {}),
   };
 }

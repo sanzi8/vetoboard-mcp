@@ -1,6 +1,6 @@
 {
   "name": "vetoboard-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Governance, Non-Compensatory Hard Veto & Zero-Hallucination Math Auditing MCP Server for Claude Code, Cursor, Antigravity, and Codex (EN/ZH).",
   "license": "Apache-2.0",
   "type": "module",

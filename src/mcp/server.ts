@@ -62,6 +62,11 @@ import {
 } from "../core/ruleGate.js";
 import { distillStandardizedSkill } from "../core/skillDistiller.js";
 import {
+  checkLatestVersionNonBlocking,
+  CURRENT_VETOBOARD_VERSION,
+  runSelfUpdate,
+} from "../core/selfUpdater.js";
+import {
   attachSkillsToRole,
   discoverNativeSkills,
   synthesizeRoleFromSkill,
@@ -115,7 +120,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
   const server = new McpServer(
     {
       name: "vetoboard-mcp",
-      version: options?.version ?? "1.0.0",
+      version: options?.version ?? CURRENT_VETOBOARD_VERSION,
     },
     {
       capabilities: {
@@ -1935,6 +1940,13 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           verificationMarkdown: verifyMd,
         }).catch(() => undefined);
 
+        // Non-blocking 24h cached version check (1,500ms hard timeout; silent when up-to-date or offline)
+        const updateNotice = await checkLatestVersionNonBlocking({
+          currentVersion: options?.version ?? CURRENT_VETOBOARD_VERSION,
+          dataRootDir: store.rootDir,
+          locale,
+        });
+
         reportNotice = zh
           ? [
               "",
@@ -1948,11 +1960,20 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
                   ]
                 : []),
               "",
-              `> **⚠️ 给宿主 Agent 的聊天输出与退场铁律**：`,
-              `> 1. 向用户汇报本轮结论时，必须保留 **跨角色交锋修正链** 与 **句末可点击文件内联角标**（如 \`[[S1·§1]](${fileUrl}#ref-s1-sec1)\`、\`[[V1]](${fileUrl}#ref-v1)\`），并附上上述三份 Markdown 文件链接；`,
-              `> 2. **本轮完成后立即干净退出 VetoBoard 多角色模式，回到普通对话模式**！后续用户的日常追问请直接轻量秒回，仅当用户明确要求开启下一阶段审计时再重新调用 VetoBoard（届时知识库将自动挂载本轮成果）。`,
+              "---",
+              `### 🎁 实战资产沉淀与社区共享菜单（任务号：\`${task.taskId}\` · 必须在最终回复末尾原样附带）`,
+              `- 💾 **沉淀为本地可复用资产**：直接回复 **「存为技能」 / 「存为角色」 / 「存为全局规则」 / 「存为项目模板」**（可多选，默认存全局库并同步宿主 IDE；若仅对当前项目生效请补充“存当前项目”，系统将调用 \`vetoboard_distill_skill\` 自动落盘）；`,
+              `- 🌍 **脱敏共享至官方资产库（方法 A）**：回复 **「预览推送」**（调用 \`vetoboard_contribute_asset({ action: "preview" })\` 先在本地剥离路径/密钥并展示预览单——收录进库后**仅用于项目升级或体验优化，且凭单号 100% 随时可撤回**）；`,
+              ...(updateNotice.updateAvailable && updateNotice.bannerMarkdown
+                ? [updateNotice.bannerMarkdown]
+                : []),
+              "",
+              `> **⚠️ 给宿主 Agent 的聊天输出与退场铁律（禁止调用 \`ask_question\` 弹窗！）**：`,
+              `> 1. 向用户汇报本轮结论时，必须保留 **跨角色交锋修正链**、**句末可点击文件内联角标**（如 \`[[S1·§1]](${fileUrl}#ref-s1-sec1)\`、\`[[V1]](${fileUrl}#ref-v1)\`）与上述三份 Markdown 文件链接；`,
+              `> 2. **必须在汇报最末尾保留上方 2–3 行「🎁 实战资产沉淀与社区共享菜单」**（若有新版本提醒一并附带），让用户想存技能/模板、预览推送或一键更新时只需回一句话即可办理；`,
+              `> 3. **输出完毕后立即干净退出 VetoBoard 多角色模式，回到普通对话模式**！`,
             ].join("\n")
-            : [
+          : [
               "",
               "### ✅ Dual-Layer Cited Audit Report Signed & Knowledge Card Saved (Exited VetoBoard Mode -> Back to Normal Chat)",
               `- Full Cited Report (\`-report.md\`): \`${primaryReportPath}\``,
@@ -1962,7 +1983,15 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
                 ? [`- 📖 Distilled to Knowledge Base: **${savedKb.title}** (\`${savedKb.knowledgeId}\`)`]
                 : []),
               "",
-              `> **⚠️ Host Chat Output & Clean-Exit Mandate**: Preserve clickable inline citations (\`[[S1·§1]](${fileUrl}#ref-s1-sec1)\`, \`[[V1]](${fileUrl}#ref-v1)\`), then **exit VetoBoard mode cleanly back to normal chat** until the user explicitly invokes VetoBoard for Phase 2!`,
+              "---",
+              `### 🎁 Post-Task Asset Export & Community Contribution Menu (Task \`${task.taskId}\` · Append at Bottom of Final Reply)`,
+              `- 💾 **Save as Reusable Local Assets**: Reply **"Save as skill" / "Save as role" / "Save as rule" / "Save as project template"** (defaults to global library + host IDE sync; say "workspace scope" for repo-local \`.agents/\`);`,
+              `- 🌍 **Contribute to Official Library (Method A)**: Reply **"Preview contribution"** (runs local privacy scrubber first — collected into library **solely for project upgrades/optimization, and 100% withdrawable anytime**);`,
+              ...(updateNotice.updateAvailable && updateNotice.bannerMarkdown
+                ? [updateNotice.bannerMarkdown]
+                : []),
+              "",
+              `> **⚠️ Host Chat Output & Clean-Exit Mandate (Do NOT call \`ask_question\`!)**: Preserve clickable inline citations (\`[[S1·§1]](${fileUrl}#ref-s1-sec1)\`, \`[[V1]](${fileUrl}#ref-v1)\`), include the concise 2–3 line **🎁 Post-Task Menu** at the very end of your reply, and **exit VetoBoard mode cleanly back to normal chat**!`,
             ].join("\n");
       }
 
@@ -2008,18 +2037,27 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
     },
   );
 
-  // 9. Standardized Skill & Role Distiller (Aligned with VetoBoard Desktop `/distill-skill`)
+  // 9. Multi-Target Standardized Asset Distiller (`SKILL.md` / `Role` / `Rule` / `.vetoboard-pack.json`)
   server.registerTool(
     "vetoboard_distill_skill",
     {
       description:
-        "Autonomously distill a completed/active VetoBoard task (or structured SOP & pitfalls) into a standardized cross-agent `SKILL.md` file (and optionally a reusable standardized Role JSON), making it auto-discoverable in future runs.",
+        "Autonomously distill a completed/active VetoBoard task (or structured SOP & pitfalls) into any combination of standardized cross-agent assets: `skill` (`SKILL.md` + optional host IDE sync), `role` (`RoleTemplate` JSON + `.md` agent), `rule` (idempotent guardrail rule `.md`), and `project-pack` (`.vetoboard-pack.json` full council lineup & model template).",
       inputSchema: z.object({
         alsoCreateRole: z
           .boolean()
           .default(false)
           .describe("Also hatch and save a companion standardized RoleTemplate JSON into library/roles/."),
+        customRuleFilePath: z
+          .string()
+          .optional()
+          .describe("Optional explicit file path (e.g. workspace AGENTS.md / GEMINI.md / CLAUDE.md) when 'rule' is in exportTargets."),
         description: z.string().optional(),
+        exportTargets: z
+          .array(z.enum(["skill", "role", "rule", "project-pack"]))
+          .optional()
+          .describe("Target asset formats to generate (defaults to ['skill']; supports any combination of 'skill', 'role', 'rule', 'project-pack')."),
+        hostIdeRootOverride: z.string().optional(),
         lang: vetoboardLocaleInputSchema,
         mustUseTools: z.array(z.string()).optional(),
         pitfalls: z.array(z.string()).optional(),
@@ -2027,15 +2065,19 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         scope: z
           .enum(["user", "workspace"])
           .default("user")
-          .describe("'user' saves to ~/.vetoboard-mcp/library/skills/<id>/SKILL.md; 'workspace' saves to <workspaceDir>/.agents/skills/<id>/SKILL.md."),
-        skillId: z.string().optional().describe("Slug ID for the distilled skill, e.g. 'saas-mor-bep-audit'."),
+          .describe("'user' saves globally to ~/.vetoboard-mcp/library/ (and optional host IDE config); 'workspace' saves to <workspaceDir>/.agents/."),
+        skillId: z.string().optional().describe("Slug ID for the distilled asset, e.g. 'saas-mor-bep-audit'."),
         sopSteps: z.array(z.string()).optional(),
+        syncToHostIde: z
+          .boolean()
+          .default(false)
+          .describe("When true and scope='user', also syncs SKILL.md into existing ~/.gemini/config/skills, ~/.claude/skills, and ~/.codex/skills."),
         taskId: z.string().optional().describe("Completed or active VetoBoard taskId to distill from."),
         title: z.string().optional(),
         verificationChecklist: z.array(z.string()).optional(),
         workspaceDir: z.string().optional(),
       }),
-      title: "VetoBoard Distill Standardized SKILL.md & Reusable Role",
+      title: "VetoBoard Multi-Target Asset Distiller (Skill / Role / Rule / Project Pack)",
     },
     async (args) => {
       const task = args.taskId ? await store.getTask(args.taskId) : undefined;
@@ -2048,8 +2090,11 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       );
       const res = await distillStandardizedSkill({
         alsoCreateRole: args.alsoCreateRole,
+        customRuleFilePath: args.customRuleFilePath,
         dataRootDir: store.rootDir,
         description: args.description,
+        exportTargets: args.exportTargets,
+        hostIdeRootOverride: args.hostIdeRootOverride,
         locale,
         mustUseTools: args.mustUseTools,
         pitfalls: args.pitfalls,
@@ -2058,6 +2103,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         skillId: args.skillId,
         sopSteps: args.sopSteps,
         store,
+        syncToHostIde: args.syncToHostIde,
         task: task ?? undefined,
         title: args.title,
         verificationChecklist: args.verificationChecklist,
@@ -2072,7 +2118,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
     "vetoboard_contribute_asset",
     {
       description:
-        "Contribute a standardized Role or Skill via Method A (privacy-scrubbed GitHub Issue/PR bundle) or withdraw a previous contribution. Enforces mandatory transparency: informs the user it will be collected into the VetoBoard library SOLELY for project upgrades/optimization, and can be withdrawn at any time.",
+        "Contribute a standardized Role, Skill, or Project Council Pack (`pack`) via Method A (privacy-scrubbed GitHub Issue/PR bundle) or withdraw a previous contribution. Enforces mandatory transparency: informs the user it will be collected into the VetoBoard library SOLELY for project upgrades/optimization, and can be withdrawn at any time.",
       inputSchema: z.object({
         action: z
           .enum(["preview", "submit", "withdraw", "list"])
@@ -2081,8 +2127,8 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         assetId: z
           .string()
           .optional()
-          .describe("Role ID or Skill ID to preview/submit (required for 'preview' and 'submit')."),
-        assetType: z.enum(["role", "skill"]).default("skill"),
+          .describe("Role ID, Skill ID, or Pack ID to preview/submit (required for 'preview' and 'submit')."),
+        assetType: z.enum(["role", "skill", "pack"]).default("skill"),
         authorHandle: z.string().optional().describe("Optional GitHub handle for creator attribution."),
         autoRunGhCli: z
           .boolean()
@@ -2151,6 +2197,42 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         locale,
         targetRepo: args.targetRepo,
         workspaceDir: args.workspaceDir,
+      });
+      return textResult(res.markdown, Boolean(res.isError));
+    },
+  );
+
+  // 11. Non-Blocking Version Check & 1-Sentence Self-Updater (`git pull` + build OR `npm i -g vetoboard-mcp@latest`)
+  server.registerTool(
+    "vetoboard_self_update",
+    {
+      description:
+        "Check for a newer `vetoboard-mcp` release or automatically pull & rebuild the latest version (supports both Git clone installs with dirty-tree protection and global npm installs). Call with `action: 'apply'` when the user says '更新 VetoBoard' / 'Update VetoBoard'.",
+      inputSchema: z.object({
+        action: z
+          .enum(["check", "apply"])
+          .default("check")
+          .describe("'check' queries latest version; 'apply' pulls & builds (Git clone) or runs `npm install -g vetoboard-mcp@latest`."),
+        dryRun: z
+          .boolean()
+          .default(false)
+          .describe("When true with action='apply', verifies git cleanliness / install mode without mutating files."),
+        lang: vetoboardLocaleInputSchema,
+        registryUrlOverride: z.string().optional(),
+        repoDirOverride: z.string().optional(),
+      }),
+      title: "VetoBoard Version Check & 1-Click Self-Updater",
+    },
+    async (args) => {
+      const locale = resolveLocale(args.lang === "auto" ? defaultLang : args.lang, "中文");
+      const res = await runSelfUpdate({
+        action: args.action,
+        currentVersion: options?.version ?? CURRENT_VETOBOARD_VERSION,
+        dataRootDir: store.rootDir,
+        dryRun: args.dryRun,
+        locale,
+        registryUrlOverride: args.registryUrlOverride,
+        repoDirOverride: args.repoDirOverride,
       });
       return textResult(res.markdown, Boolean(res.isError));
     },
