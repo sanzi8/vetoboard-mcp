@@ -6,7 +6,11 @@ import {
   retrieveRelevantKnowledge,
   type RetrievedKnowledgeAsset,
 } from "./knowledgeLibrary.js";
-import { BUILTIN_ROLE_TEMPLATES, resolveTierLabel } from "./roleCatalog.js";
+import {
+  BUILTIN_ROLE_TEMPLATES,
+  groupHostModelsForDisplay,
+  resolveTierLabel,
+} from "./roleCatalog.js";
 import {
   discoverNativeSkills,
   scoreSkillForGoal,
@@ -520,6 +524,7 @@ export function renderConversationalPreflightBriefing(params: {
   readonly locale: VetoBoardLocale;
   readonly retrieved: RetrieveReusableAssetsResult;
   readonly hostModels?: readonly HostModelCandidate[];
+  readonly activeHostModel?: string;
   readonly hostPlatform?: string;
   readonly recommendedLineup: readonly {
     readonly roleId: string;
@@ -534,7 +539,7 @@ export function renderConversationalPreflightBriefing(params: {
   }[];
   readonly rationale: readonly string[];
 }): string {
-  const { locale, retrieved, recommendedLineup, rationale, hostModels, hostPlatform } = params;
+  const { locale, retrieved, recommendedLineup, rationale, hostModels, activeHostModel, hostPlatform } = params;
   const zh = locale === "zh";
 
   const savedLibCount = retrieved.roles.filter((r) => r.origin === "vetoboard-library").length;
@@ -575,15 +580,13 @@ export function renderConversationalPreflightBriefing(params: {
     return `| ${i + 1}. **${item.title}** (\`${item.roleId}\`) | ${originLabel(item.roleId)} | ${skillsStr} | ${modelStr} | **${item.tierLabel} · \`${item.weight}\` 分** | ${reason} |`;
   });
 
-  const modelMenuLine =
+  const groupedPills =
     hostModels && hostModels.length > 0
-      ? hostModels
-          .slice(0, 12)
-          .map(
-            (m) =>
-              `\`${m.label ?? m.id}\`${m.quotaRemaining ? `(${m.quotaRemaining})` : ""}`,
-          )
-          .join(" · ") + (hostModels.length > 12 ? ` …(+${hostModels.length - 12})` : "")
+      ? groupHostModelsForDisplay(hostModels, activeHostModel, locale)
+      : [];
+  const modelMenuLine =
+    groupedPills.length > 0
+      ? groupedPills.join(" · ")
       : zh
         ? "通用档位 `pro` (旗舰强推理) · `inherit` (均衡主力) · `flash` (高速轻量) · 或任意具体模型名（如 `opus`/`sonnet`/`haiku`、`gpt-5`/`o3`、或 BYOK `deepseek-reasoner`）"
         : "Universal tiers `pro` (Frontier) · `inherit` (Balanced) · `flash` (Fast) · or any concrete model ID (`opus`/`sonnet`/`haiku`, `gpt-5`/`o3`, or BYOK `deepseek-reasoner`)";

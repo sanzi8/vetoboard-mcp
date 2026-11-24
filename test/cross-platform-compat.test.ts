@@ -391,4 +391,123 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(cursorPlaybook).toContain("单代理客户端自动降级");
     expect(cursorPlaybook).toContain("Hermes Agent 用 `delegate_task`");
   });
+
+  it("4. Zero-Omission rawHostModelsJson + 11-Family Effort Folding + Generation/Quota Ranking (fixes 23-variant truncation & retiring model bias)", async () => {
+    const swarm23Payload = JSON.stringify({
+      display_names: {
+        "claude-opus-4-6-thinking": "Claude Opus 4.6 (Thinking)",
+        "claude-sonnet-4-6": "Claude Sonnet 4.6 (Thinking)",
+        "gemini-3.8-flash-high": "Gemini 3.8 Flash (High)",
+        "gemini-3.8-flash-low": "Gemini 3.8 Flash (Low)",
+        "gemini-3.8-flash-medium": "Gemini 3.8 Flash (Medium)",
+        "gemini-4-argon-high": "Gemini 4 Argon (High)",
+        "gemini-4-argon-low": "Gemini 4 Argon (Low)",
+        "gemini-4-argon-medium": "Gemini 4 Argon (Medium)",
+        "gemini-4-carbon-high": "Gemini 4 Carbon (High)",
+        "gemini-4-carbon-low": "Gemini 4 Carbon (Low)",
+        "gemini-4-carbon-medium": "Gemini 4 Carbon (Medium)",
+        "gemini-4-hydrogen-high": "Gemini 4 Hydrogen (High)",
+        "gemini-4-hydrogen-low": "Gemini 4 Hydrogen (Low)",
+        "gemini-4-hydrogen-medium": "Gemini 4 Hydrogen (Medium)",
+        "gemini-4-hydrogen-xhigh": "Gemini 4 Hydrogen (XHigh)",
+        "gemini-4-neon-high": "Gemini 4 Neon (High)",
+        "gemini-4-neon-low": "Gemini 4 Neon (Low)",
+        "gemini-4-neon-medium": "Gemini 4 Neon (Medium)",
+        "gemini-4-neon-xhigh": "Gemini 4 Neon (XHigh)",
+        "gemini-pro-orchestrator": "Orchestrator (Carbon)",
+        "gemini-pro-orchestrator-argon": "Orchestrator (Argon)",
+        "gemini-pro-orchestrator-neon": "Orchestrator (Neon)",
+        "gpt-oss-120b-medium": "GPT-OSS 120B (Medium)",
+      },
+      models: [
+        "claude-opus-4-6-thinking",
+        "claude-sonnet-4-6",
+        "gemini-3.8-flash-high",
+        "gemini-3.8-flash-low",
+        "gemini-3.8-flash-medium",
+        "gemini-4-argon-high",
+        "gemini-4-argon-low",
+        "gemini-4-argon-medium",
+        "gemini-4-carbon-high",
+        "gemini-4-carbon-low",
+        "gemini-4-carbon-medium",
+        "gemini-4-hydrogen-high",
+        "gemini-4-hydrogen-low",
+        "gemini-4-hydrogen-medium",
+        "gemini-4-hydrogen-xhigh",
+        "gemini-4-neon-high",
+        "gemini-4-neon-low",
+        "gemini-4-neon-medium",
+        "gemini-4-neon-xhigh",
+        "gemini-pro-orchestrator",
+        "gemini-pro-orchestrator-argon",
+        "gemini-pro-orchestrator-neon",
+        "gpt-oss-120b-medium",
+      ],
+      quotas: Object.fromEntries([
+        ["claude-opus-4-6-thinking", { quota_remaining: "100%" }],
+        ["claude-sonnet-4-6", { quota_remaining: "100%" }],
+        ["gpt-oss-120b-medium", { quota_remaining: "100%" }],
+        ...[
+          "gemini-3.8-flash-high",
+          "gemini-3.8-flash-low",
+          "gemini-3.8-flash-medium",
+          "gemini-4-argon-high",
+          "gemini-4-argon-low",
+          "gemini-4-argon-medium",
+          "gemini-4-carbon-high",
+          "gemini-4-carbon-low",
+          "gemini-4-carbon-medium",
+          "gemini-4-hydrogen-high",
+          "gemini-4-hydrogen-low",
+          "gemini-4-hydrogen-medium",
+          "gemini-4-hydrogen-xhigh",
+          "gemini-4-neon-high",
+          "gemini-4-neon-low",
+          "gemini-4-neon-medium",
+          "gemini-4-neon-xhigh",
+          "gemini-pro-orchestrator",
+          "gemini-pro-orchestrator-argon",
+          "gemini-pro-orchestrator-neon",
+        ].map((id) => [id, { quota_remaining: "35%" }]),
+      ]),
+    });
+
+    const plan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            activeHostModel: "Gemini 4 Carbon",
+            domain: "commercial",
+            goal: "评估科研仪器维修过渡方案与年度维保定价",
+            hostPlatform: "antigravity",
+            lang: "zh",
+            rawHostModelsJson: swarm23Payload,
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+
+    // All 23 underlying models ingested, and all 11 UI families rendered without truncation!
+    expect(plan.availableHostModels).toHaveLength(23);
+    const md: string = plan.briefingMarkdown;
+    expect(md).toContain("`Gemini 4 Carbon [Low/Med/High] ★当前`(35%)");
+    expect(md).toContain("`Gemini 4 Neon [Low/Med/High/XHigh]`(35%)");
+    expect(md).toContain("`Gemini 4 Hydrogen [Low/Med/High/XHigh]`(35%)");
+    expect(md).toContain("`Gemini 4 Argon [Low/Med/High]`(35%)");
+    expect(md).toContain("`Orchestrator (Carbon)`(35%)");
+    expect(md).toContain("`Orchestrator (Neon)`(35%)");
+    expect(md).toContain("`Orchestrator (Argon)`(35%)");
+    expect(md).toContain("`Claude Opus 4.6 (Thinking)`(100%)");
+    expect(md).toContain("`Claude Sonnet 4.6 (Thinking)`(100%)");
+    expect(md).toContain("`GPT-OSS 120B (Medium)`(100%)");
+    expect(md).toContain("`Gemini 3.8 Flash [Low/Med/High]`(35%)");
+
+    // Verify retiring `3.8 Flash` and `Orchestrator` are NEVER recommended ahead of 4.x / 4.6 / GPT-OSS!
+    for (const item of plan.recommendedLineup as Array<{ recommendedModelId: string }>) {
+      expect(item.recommendedModelId).not.toContain("3.8-flash");
+      expect(item.recommendedModelId).not.toContain("orchestrator");
+    }
+  });
 });

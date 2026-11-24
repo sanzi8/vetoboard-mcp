@@ -463,6 +463,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       description:
         "Scan native skills across the host IDE & workspace, auto-tune Primary Lead weights for the goal, and emit 3 interactive ask_question cards (1: Primary Leads, 2: Active Roles + Spawn New Specialist Roles from Native Skills, 3: Skill Mounting per Role).",
       inputSchema: z.object({
+        activeHostModel: z
+          .string()
+          .optional()
+          .describe(
+            "Optional ID or display name of the model running the current host conversation (e.g. 'Gemini 4 Carbon' or 'gemini-4-carbon-high') so VetoBoard marks ★active and prioritizes it among same-family peers.",
+          ),
         domain: z.enum(["commercial", "swe"]).default("commercial"),
         extraSkillDirs: z.array(z.string()).optional(),
         goal: z.string().min(1),
@@ -470,12 +476,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .array(hostModelCandidateSchema)
           .optional()
           .describe(
-            "Optional list of models available on the current host platform (e.g. from Antigravity `swarm(action='models')`, Claude Code `['opus','sonnet','haiku']`, Codex profiles, or T3 Code harnesses) so Pre-Flight displays a live model picker & cross-vendor inspector recommendation.",
+            "COMPLETE list of models available on the current host platform (NEVER cherry-pick or omit models! Or pass the verbatim JSON output from `swarm(action='models', all=true)` in `rawHostModelsJson`).",
           ),
         hostPlatform: z
           .string()
           .optional()
-          .describe("Optional host IDE identifier e.g. 'antigravity', 'claude-code', 'codex', 't3code', 'cursor'."),
+          .describe("Optional host IDE identifier e.g. 'antigravity', 'claude-code', 'codex', 't3code', 'hermes', 'cursor'."),
         hostSkills: z
           .array(
             z.object({
@@ -486,6 +492,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           )
           .optional(),
         lang: vetoboardLocaleInputSchema,
+        rawHostModelsJson: z
+          .string()
+          .optional()
+          .describe(
+            "Verbatim JSON string returned by the host's model-discovery tool (e.g. Antigravity `swarm({ action: 'models', all: true })` or `/v1/models`) so 100% of model families & quotas are parsed and grouped automatically with zero omission.",
+          ),
         workspaceDir: z.string().optional(),
       }),
       title: "VetoBoard Pre-Flight Role, Model & Native Skill Bench",
@@ -505,16 +517,19 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         workspaceDir: args.workspaceDir,
       });
       const plan = buildLineupSelectorPlan({
+        activeHostModel: args.activeHostModel,
         discoveredSkills: retrieved.skills,
         domain: args.domain,
         goal: args.goal,
         hostModels: args.hostModels,
         hostPlatform: args.hostPlatform,
         locale,
+        rawHostModelsJson: args.rawHostModelsJson,
       });
       const briefingMarkdown = renderConversationalPreflightBriefing({
+        activeHostModel: args.activeHostModel,
         goal: args.goal,
-        hostModels: args.hostModels,
+        hostModels: plan.availableHostModels,
         hostPlatform: args.hostPlatform,
         locale,
         rationale: plan.rationale,

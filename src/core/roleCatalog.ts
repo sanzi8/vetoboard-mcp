@@ -801,13 +801,266 @@ function inferHostModelTier(id: string, explicitTier?: "frontier" | "balanced" |
   return "balanced";
 }
 
+const EFFORT_LABEL_SUFFIX_RE = /\s*\((XHigh|High|Medium|Med|Low|Minimal)\)\s*$/i;
+const EFFORT_ID_SUFFIX_RE = /-(xhigh|high|medium|med|low|minimal)$/i;
+
+const EFFORT_RANK: Readonly<Record<string, number>> = {
+  high: 4,
+  low: 2,
+  med: 3,
+  medium: 3,
+  minimal: 1,
+  xhigh: 5,
+};
+
+function shortEffortLabel(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower === "medium" || lower === "med") return "Med";
+  if (lower === "xhigh") return "XHigh";
+  if (lower === "minimal") return "Min";
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+export function extractBaseModelAndEffort(
+  id: string,
+  label?: string,
+): { readonly baseId: string; readonly baseLabel: string; readonly effort?: string } {
+  const display = (label ?? id).trim();
+  const labelMatch = EFFORT_LABEL_SUFFIX_RE.exec(display);
+  const idMatch = EFFORT_ID_SUFFIX_RE.exec(id.trim());
+  const baseId = idMatch ? id.trim().slice(0, idMatch.index) : id.trim();
+  if (labelMatch) {
+    return {
+      baseId,
+      baseLabel: display.slice(0, labelMatch.index).trim(),
+      effort: shortEffortLabel(labelMatch[1]!),
+    };
+  }
+  if (!label && idMatch) {
+    return {
+      baseId,
+      baseLabel: baseId,
+      effort: shortEffortLabel(idMatch[1]!),
+    };
+  }
+  return { baseId, baseLabel: display };
+}
+
+export function normalizeHostModelCandidates(
+  explicitModels?: readonly HostModelCandidate[],
+  rawHostModelsJson?: string,
+): HostModelCandidate[] {
+  const byId = new Map<string, HostModelCandidate>();
+
+  if (rawHostModelsJson?.trim()) {
+    try {
+      const parsed = JSON.parse(rawHostModelsJson.trim()) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (typeof item === "string" && item.trim()) {
+            byId.set(item.trim(), { id: item.trim() });
+          } else if (item && typeof item === "object") {
+            const obj = item as Record<string, unknown>;
+            const id = typeof obj.id === "string" ? obj.id.trim() : "";
+            if (id) {
+              byId.set(id, {
+                ...(typeof obj.family === "string" ? { family: obj.family } : {}),
+                id,
+                ...(typeof obj.label === "string"
+                  ? { label: obj.label }
+                  : typeof obj.name === "string"
+                    ? { label: obj.name }
+                    : {}),
+                ...(typeof obj.quotaRemaining === "string"
+                  ? { quotaRemaining: obj.quotaRemaining }
+                  : {}),
+              });
+            }
+          }
+        }
+      } else if (parsed && typeof parsed === "object") {
+        const obj = parsed as {
+          models?: unknown;
+          display_names?: Record<string, unknown>;
+          quotas?: Record<string, { quota_remaining?: unknown }>;
+          data?: unknown;
+        };
+        // Antigravity `swarm({ action: "models", all: true })` payload format
+        if (Array.isArray(obj.models)) {
+          for (const m of obj.models) {
+            if (typeof m !== "string" || !m.trim()) continue;
+            const id = m.trim();
+            const rawDisplay = obj.display_names?.[id];
+            const rawQuota = obj.quotas?.[id]?.quota_remaining;
+            byId.set(id, {
+              id,
+              ...(typeof rawDisplay === "string" && rawDisplay.trim()
+                ? { label: rawDisplay.trim() }
+                : {}),
+              ...(typeof rawQuota === "string" && rawQuota.trim()
+                ? { quotaRemaining: rawQuota.trim() }
+                : {}),
+            });
+          }
+        }
+        // OpenAI / OpenRouter `/v1/models` `{ data: [...] }` payload format
+        if (Array.isArray(obj.data)) {
+          for (const item of obj.data) {
+            if (!item || typeof item !== "object") continue;
+            const rec = item as Record<string, unknown>;
+            const id = typeof rec.id === "string" ? rec.id.trim() : "";
+            if (!id) continue;
+            byId.set(id, {
+              id,
+              ...(typeof rec.name === "string" && rec.name.trim() ? { label: rec.name.trim() } : {}),
+            });
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed raw JSON and rely on explicitModels
+    }
+  }
+
+  for (const m of explicitModels ?? []) {
+    const prev = byId.get(m.id);
+    byId.set(m.id, { ...prev, ...m });
+  }
+
+  return [...byId.values()];
+}
+
+function extractModelGenerationScore(id: string, label?: string): number {
+  const text = `${label ?? ""} ${id}`;
+  // Match version numbers like `4.6`, `4`, `3.8`, `5.4` while ignoring parameter sizes like `120B`, `70B`, `32k`
+  const re = /(?<![a-z0-9.])(\d+(?:\.\d+)?)(?![0-9.]*[bkm]\b)/gi;
+  let best = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    const val = Number.parseFloat(match[1]!);
+    if (Number.isFinite(val) && val > 0 && val < 30 && val > best) {
+      best = val;
+    }
+  }
+  return best * 8;
+}
+
+export function scoreModelCandidate(
+  m: HostModelCandidate,
+  activeHostModel?: string,
+  forLeafWorker = true,
+): number {
+  let score = extractModelGenerationScore(m.id, m.label);
+
+  if (m.quotaRemaining) {
+    const pctMatch = /(\d+(?:\.\d+)?)\s*%/.exec(m.quotaRemaining);
+    if (pctMatch) {
+      const pct = Number.parseFloat(pctMatch[1]!);
+      if (pct <= 0) score -= 1_000;
+      else score += pct * 0.25;
+    }
+  }
+
+  if (forLeafWorker && /orchestrator/i.test(`${m.id} ${m.label ?? ""}`)) {
+    score -= 12;
+  }
+
+  const { effort, baseId, baseLabel } = extractBaseModelAndEffort(m.id, m.label);
+  if (effort) {
+    score += (EFFORT_RANK[effort.toLowerCase()] ?? 2) * 0.4;
+  }
+
+  if (activeHostModel?.trim()) {
+    const activeClean = extractBaseModelAndEffort(activeHostModel, activeHostModel);
+    const activeNeedle = activeClean.baseLabel.toLowerCase();
+    const activeIdNeedle = activeClean.baseId.toLowerCase();
+    if (
+      baseLabel.toLowerCase() === activeNeedle ||
+      baseId.toLowerCase() === activeIdNeedle ||
+      (activeNeedle.length >= 4 && baseLabel.toLowerCase().includes(activeNeedle))
+    ) {
+      score += 18;
+    }
+  }
+
+  return score;
+}
+
+export function groupHostModelsForDisplay(
+  hostModels: readonly HostModelCandidate[],
+  activeHostModel?: string,
+  locale: VetoBoardLocale = "zh",
+): string[] {
+  interface FamilyBucket {
+    baseLabel: string;
+    items: HostModelCandidate[];
+    efforts: Set<string>;
+    quota?: string;
+    bestScore: number;
+    isActive: boolean;
+  }
+
+  const buckets = new Map<string, FamilyBucket>();
+  const activeClean = activeHostModel?.trim()
+    ? extractBaseModelAndEffort(activeHostModel, activeHostModel)
+    : undefined;
+
+  for (const m of hostModels) {
+    const { baseId, baseLabel, effort } = extractBaseModelAndEffort(m.id, m.label);
+    const key = baseLabel.toLowerCase();
+    const sc = scoreModelCandidate(m, activeHostModel, false);
+    const matchesActive = Boolean(
+      activeClean &&
+        (baseLabel.toLowerCase() === activeClean.baseLabel.toLowerCase() ||
+          baseId.toLowerCase() === activeClean.baseId.toLowerCase() ||
+          (activeClean.baseLabel.length >= 4 &&
+            baseLabel.toLowerCase().includes(activeClean.baseLabel.toLowerCase()))),
+    );
+
+    const existing = buckets.get(key);
+    if (!existing) {
+      const efforts = new Set<string>();
+      if (effort) efforts.add(effort);
+      buckets.set(key, {
+        baseLabel,
+        bestScore: sc,
+        efforts,
+        isActive: matchesActive,
+        items: [m],
+        ...(m.quotaRemaining ? { quota: m.quotaRemaining } : {}),
+      });
+    } else {
+      existing.items.push(m);
+      if (effort) existing.efforts.add(effort);
+      if (sc > existing.bestScore) existing.bestScore = sc;
+      if (matchesActive) existing.isActive = true;
+      if (!existing.quota && m.quotaRemaining) existing.quota = m.quotaRemaining;
+    }
+  }
+
+  const sorted = [...buckets.values()].sort((a, b) => b.bestScore - a.bestScore);
+  return sorted.slice(0, 30).map((b) => {
+    const activeBadge = b.isActive ? (locale === "zh" ? " ★当前" : " ★active") : "";
+    const quotaSuffix = b.quota ? `(${b.quota})` : "";
+    if (b.items.length === 1 || b.efforts.size <= 1) {
+      const single = b.items[0]!;
+      return `\`${single.label ?? single.id}${activeBadge}\`${quotaSuffix}`;
+    }
+    const orderedEfforts = [...b.efforts].sort(
+      (x, y) => (EFFORT_RANK[x.toLowerCase()] ?? 9) - (EFFORT_RANK[y.toLowerCase()] ?? 9),
+    );
+    return `\`${b.baseLabel} [${orderedEfforts.join("/")}]${activeBadge}\`${quotaSuffix}`;
+  });
+}
+
 export function recommendModelForRole(params: {
   readonly role: RoleTemplate;
   readonly hostModels?: readonly HostModelCandidate[];
+  readonly activeHostModel?: string;
   readonly primaryLeadFamily?: string;
   readonly locale: VetoBoardLocale;
 }): { readonly modelId: string; readonly displayLabel: string } {
-  const { role, hostModels, primaryLeadFamily, locale } = params;
+  const { role, hostModels, activeHostModel, primaryLeadFamily, locale } = params;
   const zh = locale === "zh";
 
   if (role.modelBinding) {
@@ -825,15 +1078,18 @@ export function recommendModelForRole(params: {
   }
 
   if (hostModels && hostModels.length > 0) {
-    const enriched = hostModels.map((m) => ({
-      ...m,
-      inferredFamily: inferHostModelFamily(m.id, m.family),
-      inferredTier: inferHostModelTier(m.id, m.tier),
-    }));
+    const enriched = hostModels
+      .map((m) => ({
+        ...m,
+        inferredFamily: inferHostModelFamily(m.id, m.family),
+        inferredTier: inferHostModelTier(m.id, m.tier),
+        rankScore: scoreModelCandidate(m, activeHostModel, true),
+      }))
+      .sort((a, b) => b.rankScore - a.rankScore);
 
     let chosen = enriched[0]!;
     if (role.kind === "inspector") {
-      // Adversarial Cross-Family Rule: prefer a DIFFERENT model family from Primary Lead to eliminate shared blind spots!
+      // Adversarial Cross-Family Rule: prefer highest-ranked model from a DIFFERENT family than Primary Lead!
       chosen =
         enriched.find(
           (m) =>
@@ -895,6 +1151,8 @@ export function buildLineupSelectorPlan(params: {
   readonly domain?: "commercial" | "swe";
   readonly discoveredSkills?: readonly DiscoveredSkill[];
   readonly hostModels?: readonly HostModelCandidate[];
+  readonly rawHostModelsJson?: string;
+  readonly activeHostModel?: string;
   readonly hostPlatform?: string;
   readonly locale?: VetoBoardLocale;
 }): {
@@ -1065,10 +1323,11 @@ export function buildLineupSelectorPlan(params: {
       : []),
   ];
 
-  const hostModels = params.hostModels ?? [];
+  const hostModels = normalizeHostModelCandidates(params.hostModels, params.rawHostModelsJson);
   const leadModelPick =
     specialists.length > 0
       ? recommendModelForRole({
+          activeHostModel: params.activeHostModel,
           hostModels,
           locale,
           role: specialists[0]!,
@@ -1092,6 +1351,7 @@ export function buildLineupSelectorPlan(params: {
     rationale: resolved.rationale,
     recommendedLineup: resolved.roles.map((r) => {
       const mPick = recommendModelForRole({
+        activeHostModel: params.activeHostModel,
         hostModels,
         locale,
         primaryLeadFamily,
