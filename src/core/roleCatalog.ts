@@ -1,0 +1,1023 @@
+import { type VetoBoardLocale, t } from "../i18n/locales.js";
+import { formatExecutableRulesForPrompt } from "./ruleGate.js";
+import {
+  attachSkillsToRole,
+  recommendSkillBindingsAndCandidates,
+  synthesizeRoleFromSkill,
+  type DiscoveredSkill,
+} from "./skillRadar.js";
+import type {
+  ClarifyQuestion,
+  CustomRoleInput,
+  RoleModelBinding,
+  RolePriorityTier,
+  RoleTemplate,
+  VetoBoardAssetPack,
+} from "./types.js";
+
+/**
+ * Built-in Bilingual (`en` + `zh`) Weighted Role Catalog:
+ * - Commercial Strategy & Unit Economics Council
+ * - Google 7-Gate Software Engineering Suite
+ * Open-Core Note: Includes foundational starter rules; domain-specific vertical packs load via `.vetoboard-pack.json` or VetoBoard Cloud.
+ */
+
+export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
+  {
+    allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "vetoboard_calc"],
+    domain: "commercial",
+    evidenceRequirements: [
+      "Verifiable source URL or explicit [ASSUMPTION] tag for every market/price claim",
+      "Replacement-cost ceiling sanity check (upgrade/repair price vs brand-new equivalent)",
+    ],
+    executableRules: [
+      {
+        description: "Separate verified facts from unverified assumptions.",
+        enforcement: "soft",
+        escalateOnTrigger: false,
+        forbiddenPatterns: [],
+        mustIncludeKeywords: [],
+        mustInvokeSkills: [],
+        mustUseTools: [],
+        ruleId: "rule-market-evidence",
+        title: "Separate Empirical Evidence vs Assumptions",
+      },
+    ],
+    kind: "professional",
+    name: {
+      en: "Market & Replacement-Ceiling Strategist",
+      zh: "多路线市场与重置天花板专员",
+    },
+    priorityTier: "primary",
+    readOnly: true,
+    roleId: "market-analyst",
+    systemCharter: {
+      en: "You are the [Primary Lead · Weight 95/100] Market & Strategy Specialist. Anchor real buyer budgets, payment line-items, and brand-new replacement cost ceilings before recommending any route. Never fabricate unverified market size numbers — separate [VERIFIED] facts from [ASSUMPTION] ranges.",
+      zh: "你是【核心主导 · 权重 95/100】多路线市场与买单原语专员。必须先锚定真实买单方、付款预算科目与同档新品重置价天花板（严防修/改不如买新），严格隔离【已验证】实证区与【待确认】假设区，严禁编造无来源成交均价。",
+    },
+    weight: 95,
+  },
+  {
+    allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
+    domain: "commercial",
+    evidenceRequirements: [
+      "Deterministic vetoboard_calc output for BEP, contribution margin, and sensitivity matrix",
+      "Explicit Founder labor opportunity-cost accounting",
+    ],
+    executableRules: [
+      {
+        description: "All BEP, margin, sensitivity, and weighted scoring math MUST invoke vetoboard_calc.",
+        enforcement: "hard",
+        escalateOnTrigger: false,
+        forbiddenPatterns: ["guaranteed profit", "稳赚不赔"],
+        mustIncludeKeywords: ["BEP"],
+        mustInvokeSkills: [],
+        mustUseTools: ["vetoboard_calc"],
+        ruleId: "rule-deterministic-calc",
+        title: "Mandatory Deterministic Math via vetoboard_calc",
+      },
+    ],
+    kind: "professional",
+    name: {
+      en: "Unit Economics & BEP Actuary",
+      zh: "单位经济性与精算建模专员",
+    },
+    priorityTier: "primary",
+    readOnly: true,
+    roleId: "profit-modeler",
+    systemCharter: {
+      en: "You are the [Primary Co-Lead · Weight 92/100] Unit Economics Actuary. Every margin, break-even point (BEP), capacity ceiling, and sensitivity table MUST be computed via `vetoboard_calc` (zero mental math!). Always distinguish accounting gross margin from true economic profit after founder opportunity-cost wages and taxes.",
+      zh: "你是【核心精算 · 权重 92/100】单位经济性与精算专员。凡涉及毛利、盈亏平衡点（BEP）、产能上限、加权打分与敏感性矩阵，必须调用 `vetoboard_calc` 确定性引擎核算（严禁心算！），并严格区分表面会计毛利与扣除创始人机会成本工资及税费后的真实经济利润。",
+    },
+    weight: 92,
+  },
+  {
+    allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+    domain: "compliance",
+    evidenceRequirements: [
+      "Applicable jurisdiction, statute/regulation citation, and effective status",
+      "Constructive compliant alternative structure whenever a redline is flagged",
+    ],
+    executableRules: [
+      {
+        description: "Never hand-solve multi-variable financial algebra; focus on statutory redlines & compliant structures.",
+        enforcement: "soft",
+        escalateOnTrigger: true,
+        forbiddenPatterns: [],
+        mustIncludeKeywords: [],
+        mustInvokeSkills: [],
+        mustUseTools: [],
+        ruleId: "rule-compliance-construct",
+        title: " Statutory Redlines + Constructive Compliant Alternative",
+      },
+    ],
+    kind: "professional",
+    name: {
+      en: "Compliance & Statutory Guardrail Officer",
+      zh: "合规与法律风控护栏官",
+    },
+    priorityTier: "guardrail",
+    readOnly: true,
+    roleId: "legal-advisor",
+    systemCharter: {
+      en: "You are the [Compliance Guardrail · Weight 85/100]. Audit licensing, regulatory approvals (e.g. FDA/FCC/HIPAA/GDPR/SOC2 or NMPA/SRRC/CPA), tax/invoicing consistency, and IP/warranty boundaries. Do NOT merely veto — design a lawful structural alternative (e.g. non-invasive external bypass + B2B service contract). If an alternative reverses the user's core revenue model, flag `altersCorePremise=true` for human decision.",
+      zh: "你是【合规风控护栏 · 权重 85/100】。严查行业准入资质（如医疗器械/特种作业/强检计量/无线核准）、财税票货一致、国资/内控红线与知识产权边界。严禁只做消极否决——指出违法死穴的同时必须设计合法替代交易结构；若替代方案颠覆了用户收费闭环，必须显式上报人工拍板。",
+    },
+    weight: 85,
+  },
+  {
+    allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
+    domain: "engineering",
+    evidenceRequirements: [
+      "Component BOM breakdown, labor-hour quota, and safety/acceptance checklist",
+    ],
+    executableRules: [],
+    kind: "professional",
+    name: {
+      en: "Engineering & Delivery SOP Specialist",
+      zh: "工程边界与低阻力交付专员",
+    },
+    priorityTier: "secondary",
+    readOnly: true,
+    roleId: "tech-feasibility",
+    systemCharter: {
+      en: "You are the [Engineering & Delivery Guardrail · Weight 75/100]. Define realistic BOM tiers, per-order labor hours, zero-inventory procurement SOPs, safety test gates, and rework stop-loss thresholds. Serve the primary commercial goal without over-engineering.",
+      zh: "你是【工程与交付专员 · 权重 75/100】。负责拆解真实 BOM 分档、单套工时定额、零库存按单采购 SOP、安全放行测试阈值与返修止损线，用极简可落地的工程方案支撑商业闭环，严禁过度工程化。",
+    },
+    weight: 75,
+  },
+  {
+    allowedTools: ["Read", "Grep", "Glob", "Edit", "Write", "vetoboard_calc"],
+    domain: "swe",
+    evidenceRequirements: [
+      "Explicit Non-Goals boundary + WHEN/THEN acceptance scenarios + typed contract first",
+    ],
+    executableRules: [
+      {
+        description: "No mock/hardcoded fake implementations or TODO stubs in production paths.",
+        enforcement: "hard",
+        escalateOnTrigger: false,
+        forbiddenPatterns: ["TODO:\\s*implement", "FIXME:\\s*mock"],
+        mustIncludeKeywords: [],
+        mustInvokeSkills: [],
+        mustUseTools: [],
+        ruleId: "rule-swe-no-fake-stubs",
+        title: "Google 7-Gate: Zero Fake Stubs & Contract-First",
+      },
+    ],
+    kind: "professional",
+    name: {
+      en: "7-Gate Software Architect & Engineer",
+      zh: "Google 7-Gate 架构契约与研发专员",
+    },
+    priorityTier: "primary",
+    readOnly: false,
+    roleId: "software-architect",
+    systemCharter: {
+      en: "You are the [7-Gate Software Architect · Weight 95/100]. Enforce Gate 1 (Non-Goals & WHEN/THEN living specs), Gate 2 (Contract-First shared schemas), Gate 3 (Non-overlapping OWNERS file boundaries & Small CLs), and Gate 4/5 (Hermetic unit tests before completion).",
+      zh: "你是【Google 7-Gate 架构契约师 · 权重 95/100】。严格执行 Gate 1（Non-Goals 边界与『当…那么…』活体规格）、Gate 2（契约先行）、Gate 3（同波次 OWNERS 目录独占防写冲突）与 Gate 4/5（密封自动化单测同交）。",
+    },
+    weight: 95,
+  },
+  {
+    allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
+    domain: "inspection",
+    evidenceRequirements: [
+      "Independent `vetoboard_calc` (`mode='reconcile'`) verification receipt for all numeric claims",
+      "Exact file:line or section citations for P0 defects; classify minor style items as Nit without blocking",
+    ],
+    executableRules: [
+      {
+        description: "Inspector must run independent vetoboard_calc reconcile when auditing quantitative deliverables.",
+        enforcement: "soft",
+        escalateOnTrigger: false,
+        forbiddenPatterns: [],
+        mustIncludeKeywords: [],
+        mustInvokeSkills: [],
+        mustUseTools: ["vetoboard_calc"],
+        ruleId: "rule-inspector-reconcile",
+        title: "Independent Arithmetic Reconciliation",
+      },
+    ],
+    kind: "inspector",
+    name: {
+      en: "Adversarial Quality & Math Inspector",
+      zh: "独立只读铁面督察官",
+    },
+    priorityTier: "guardrail",
+    readOnly: true,
+    roleId: "quality-inspector",
+    systemCharter: {
+      en: "You are the [Adversarial Read-Only Inspector · Weight 85/100]. Recompute every key formula independently via `vetoboard_calc (mode='reconcile')` and check statutory/contract redlines. Reject (`passed: false`) ONLY on P0 defects (math discrepancies > 0.5%, double-counted costs, fabricated sources, or fatal legal/test failures); record P2 minor phrasing tweaks as non-blocking `Nit:` notes and pass.",
+      zh: "你是【独立只读铁面督察官 · 权重 85/100】。必须调用 `vetoboard_calc (mode='reconcile')` 对上游关键数字做独立复算并核查硬规则。仅当存在 P0 实质性硬伤（算术偏差 >0.5%、重复计费、伪造信源、触碰法律死穴或单测失败）时判 `passed: false` 打回；P2 轻微措辞细节一律记入 `Nit:` 残余风险放行，严禁吹毛求疵无限拉锯。",
+    },
+    weight: 85,
+  },
+];
+
+export const CROSS_EXAMINER_ROLE_TEMPLATE: RoleTemplate = {
+  allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
+  domain: "inspection",
+  evidenceRequirements: [
+    "At least 3 explicit Role-A vs Role-B contradiction clashes citing upstream track metrics",
+    "Forced Concession & Revised Parameter Table feeding into Wave 3 vetoboard_calc reconciliation",
+  ],
+  executableRules: [],
+  kind: "professional",
+  name: {
+    en: "Cross-Role Adversarial Clash Moderator",
+    zh: "交叉质询与角色交锋官",
+  },
+  priorityTier: "primary",
+  readOnly: true,
+  roleId: "cross-examiner",
+  systemCharter: {
+    en: "You are the [Wave 2 Cross-Role Clash Moderator · Weight 94/100]. You receive all Wave 1 specialists' independent proposals and MUST force direct role-vs-role confrontation. Identify at least 3 concrete assumption clashes across tracks (e.g. Market WTP ceiling vs Profit ARPU, Legal MoR/compliance fees vs Profit margin, Engineering infra/API limits vs Product scope), adjudicate forced concessions weighted by role authority scores (Primary Lead >=95 prevails on commercial direction, but NEVER overrides statutory redlines or deterministic math), and output a structured Cross-Examination Clash & Parameter Revision Matrix.",
+    zh: "你是【第 2 波角色交锋与交叉质询官 · 权重 94/100】。你将同时拿到第 1 波全部专员的独立盲审摘要，必须主持真刀真枪的『跨席位正面互撕与交叉质询』：至少揪出 3 处跨角色前提打架或口径冲突（例如：市场轨免费替代天花板 vs 精算轨高转化假设、合规轨 MoR/牌照真实税费 vs 精算轨低抽成假设、工程轨真实配额/算力瓶颈 vs 业务承诺），按角色权重梯度（核心主导 ≥95 分掌握战略拍板权，但绝不可凌驾于法律死穴与算术定律之上）裁定『谁必须向谁让步、哪个关键参数必须重修』，并输出《跨席位交锋质询与参数强制修正表》移交第 3 波铁面督察复算。",
+  },
+  weight: 94,
+};
+
+export function findRoleTemplate(roleId: string): RoleTemplate | undefined {
+  if (roleId === CROSS_EXAMINER_ROLE_TEMPLATE.roleId) {
+    return CROSS_EXAMINER_ROLE_TEMPLATE;
+  }
+  return BUILTIN_ROLE_TEMPLATES.find((r) => r.roleId === roleId);
+}
+
+export function customRoleToTemplate(input: CustomRoleInput): RoleTemplate {
+  const safeId = input.roleId.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").toLowerCase() || "custom-specialist";
+  const hasRules =
+    (input.mustUseTools?.length ?? 0) > 0 ||
+    (input.mustIncludeKeywords?.length ?? 0) > 0 ||
+    (input.forbiddenPatterns?.length ?? 0) > 0;
+  return {
+    allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+    domain: "commercial",
+    evidenceRequirements: ["Verifiable empirical evidence or deterministic vetoboard_calc receipt"],
+    executableRules: hasRules
+      ? [
+          {
+            description: `Custom rule contract for ${input.title}`,
+            enforcement: "hard",
+            escalateOnTrigger: false,
+            forbiddenPatterns: input.forbiddenPatterns ?? [],
+            mustIncludeKeywords: input.mustIncludeKeywords ?? [],
+            mustInvokeSkills: [],
+            mustUseTools: input.mustUseTools ?? [],
+            ruleId: `rule-custom-${safeId}`,
+            title: `${input.title} Custom Gate`,
+          },
+        ]
+      : [],
+    kind: "professional",
+    ...(input.modelBinding ? { modelBinding: input.modelBinding } : {}),
+    name: { en: input.title, zh: input.title },
+    priorityTier: input.priorityTier ?? "primary",
+    readOnly: true,
+    roleId: safeId,
+    systemCharter: { en: input.charter, zh: input.charter },
+    weight: input.weight ?? 90,
+  };
+}
+
+export function normalizeRoleModelBinding(
+  raw: string | RoleModelBinding,
+): RoleModelBinding {
+  if (typeof raw !== "string") {
+    return {
+      ...raw,
+      kind: raw.kind ?? (raw.hostModelTier ? "host-tier" : "byok"),
+    };
+  }
+  const clean = raw.trim();
+  const lower = clean.toLowerCase();
+  if (lower === "inherit" || lower === "pro" || lower === "flash" || lower === "flash_lite") {
+    return { hostModelTier: lower, kind: "host-tier" };
+  }
+  const sepIdx = clean.search(/[:/]/);
+  if (sepIdx > 0 && sepIdx < clean.length - 1) {
+    return {
+      kind: "byok",
+      modelId: clean.slice(sepIdx + 1).trim(),
+      providerId: clean.slice(0, sepIdx).trim(),
+    };
+  }
+  return { kind: "byok", modelId: clean };
+}
+
+export function formatModelBindingLabel(binding?: RoleModelBinding): string | undefined {
+  if (!binding) return undefined;
+  if (binding.kind === "host-tier" && binding.hostModelTier) {
+    return binding.hostModelTier;
+  }
+  if (binding.modelId) {
+    const prov = binding.providerId ? `${binding.providerId}/` : "";
+    const rsn = binding.reasoningLevel ? `(${binding.reasoningLevel})` : "";
+    return `${prov}${binding.modelId}${rsn}`;
+  }
+  return undefined;
+}
+
+export function parseNaturalLanguageModelOverrides(
+  text?: string,
+): Record<string, RoleModelBinding> {
+  if (!text?.trim()) return {};
+  const out: Record<string, RoleModelBinding> = {};
+  const aliasPairs: ReadonlyArray<readonly [RegExp, string]> = [
+    [/(?:精算|财务|成本|盈利|profit[-_]?modeler)/iu, "profit-modeler"],
+    [/(?:市场|选品|竞品|market[-_]?analyst)/iu, "market-analyst"],
+    [/(?:合规|法务|法律|风控|legal[-_]?advisor)/iu, "legal-advisor"],
+    [/(?:工程|技术|交付|tech[-_]?feasibility)/iu, "tech-feasibility"],
+    [/(?:架构|architect|software[-_]?architect)/iu, "software-architect"],
+    [/(?:督察|质检|终检|终验|inspector|quality[-_]?inspector)/iu, "quality-inspector"],
+  ];
+  const segments = text.split(/[,，;；。\n]+/);
+  for (const seg of segments) {
+    const modelMatch = /(?:用|绑定|指定|切|model\s*[=:：]?|use)\s*([a-zA-Z0-9._:/-]+)\b/iu.exec(seg);
+    if (!modelMatch) continue;
+    const rawModel = modelMatch[1]!.trim();
+    if (/^\d+$/.test(rawModel)) continue; // Ignore numeric weights like `用 95`
+    for (const [re, roleId] of aliasPairs) {
+      if (re.test(seg)) {
+        out[roleId] = normalizeRoleModelBinding(rawModel);
+      }
+    }
+  }
+  return out;
+}
+
+const COMPLIANCE_HEAVY_RE =
+  /(?:合规|法务|法律|医疗|器械|牌照|资质|税|开票|隐私|海关|药监|强检|特种|GDPR|HIPAA|FDA|FCC|SOC2|EPR|CPRA|FCRA|compliance|legal|regul|privacy|tax|licens|statutory)/iu;
+const FINANCE_HEAVY_RE =
+  /(?:定价|回本|毛利|盈亏|抽佣|退货|精算|成本|客单价|月费|年费|订阅|ROI|LTV|CAC|现金流|pricing|margin|bep|break[- ]?even|unit\s+economics|arpu|churn|profit|\$\d+)/iu;
+const TECH_HEAVY_RE =
+  /(?:硬件|BOM|高并发|延迟|吞吐|分布式|网关|集群|固件|架构|接口|数据库|qps|req\/s|latency|throughput|distributed|webhook|hardware|bom|infra|microservice)/iu;
+const MARKET_HEAVY_RE =
+  /(?:赛道|选品|转型|市场|竞品|买单|切入|方向|出海|独立站|跨境|market|positioning|pivot|competitor|niche|go[- ]to[- ]market)/iu;
+
+export interface ResolveCouncilLineupInput {
+  readonly goal: string;
+  readonly domain?: "commercial" | "swe";
+  readonly locale?: VetoBoardLocale;
+  readonly autoTuneWeights?: boolean;
+  readonly roleIds?: readonly string[];
+  readonly excludeRoleIds?: readonly string[];
+  readonly primaryRoleIds?: readonly string[];
+  readonly weightOverrides?: Readonly<Record<string, number>>;
+  readonly tierOverrides?: Readonly<Record<string, RolePriorityTier>>;
+  readonly modelOverrides?: Readonly<Record<string, string | RoleModelBinding>>;
+  readonly customRoles?: readonly CustomRoleInput[];
+  readonly reusableRoles?: readonly RoleTemplate[];
+  readonly discoveredSkills?: readonly DiscoveredSkill[];
+  readonly spawnRoleFromSkillIds?: readonly string[];
+  readonly roleSkillBindings?: Readonly<Record<string, readonly string[]>>;
+  readonly globalSkillIds?: readonly string[];
+  readonly enforceHardSkillGate?: boolean;
+  readonly includeInspector?: boolean;
+}
+
+export interface ResolvedCouncilLineup {
+  readonly roles: readonly RoleTemplate[];
+  readonly rationale: readonly string[];
+  readonly boundSkillsByRoleId: Readonly<Record<string, readonly string[]>>;
+}
+
+export function resolveTierLabel(role: RoleTemplate, locale: VetoBoardLocale): string {
+  const dict = t(locale);
+  if (role.roleId === "cross-examiner") {
+    return locale === "zh" ? "交叉质询交锋" : "Cross-Debate";
+  }
+  if (role.kind === "inspector") return dict.tierInspector;
+  if (role.priorityTier === "primary") return dict.tierPrimary;
+  if (role.priorityTier === "guardrail") {
+    return role.domain === "engineering" ? dict.tierGuardrailEng : dict.tierGuardrailLegal;
+  }
+  return dict.tierSupport;
+}
+
+/**
+ * Resolves the active role bench with:
+ * 1. Smart topic-aware dynamic Primary Lead & weight tuning (`autoTuneWeights !== false`)
+ * 2. Explicit `primaryRoleIds`, `roleIds`, `excludeRoleIds`, `weightOverrides`, `tierOverrides`
+ * 3. On-the-fly `customRoles` injection
+ */
+export function resolveCouncilLineup(input: ResolveCouncilLineupInput): ResolvedCouncilLineup {
+  const locale = input.locale ?? "en";
+  const zh = locale === "zh";
+  const domain = input.domain ?? "commercial";
+  const includeInspector = input.includeInspector !== false;
+  const rationale: string[] = [];
+
+  const defaultSpecialistIds =
+    domain === "swe"
+      ? ["software-architect", "tech-feasibility"]
+      : ["market-analyst", "profit-modeler", "legal-advisor", "tech-feasibility"];
+
+  const excludeSet = new Set((input.excludeRoleIds ?? []).map((s) => s.trim().toLowerCase()));
+  const requestedIds =
+    input.roleIds !== undefined
+      ? input.roleIds.filter((id) => id !== "quality-inspector")
+      : defaultSpecialistIds;
+
+  const reusableById = new Map(
+    (input.reusableRoles ?? []).map((r) => [r.roleId.toLowerCase(), r]),
+  );
+
+  let specialists: RoleTemplate[] = [];
+  for (const id of requestedIds) {
+    if (excludeSet.has(id.toLowerCase())) continue;
+    const found = findRoleTemplate(id) ?? reusableById.get(id.toLowerCase());
+    if (found) specialists.push({ ...found });
+  }
+
+  // Also auto-include saved library / workspace reusable roles when default lineup is used and they match strongly
+  if (input.roleIds === undefined && input.reusableRoles) {
+    const existingIds = new Set(specialists.map((s) => s.roleId.toLowerCase()));
+    for (const saved of input.reusableRoles) {
+      if (existingIds.has(saved.roleId.toLowerCase()) || excludeSet.has(saved.roleId.toLowerCase())) {
+        continue;
+      }
+      // Only auto-attach non-builtin library roles if their keywords match the goal
+      const words = saved.name.en.toLowerCase().split(/[\s·_-]+/).filter((w) => w.length >= 3);
+      if (words.some((w) => input.goal.toLowerCase().includes(w))) {
+        specialists.push({ ...saved });
+        existingIds.add(saved.roleId.toLowerCase());
+        rationale.push(
+          zh
+            ? `从角色复用库自动命中并挂载已有专员「${saved.name.zh}」(权重 ${saved.weight})`
+            : `Retrieved & mounted saved reusable role "${saved.name.en}" (W${saved.weight})`,
+        );
+      }
+    }
+  }
+
+  // Append custom ad-hoc roles
+  for (const custom of input.customRoles ?? []) {
+    const tpl = customRoleToTemplate(custom);
+    if (!excludeSet.has(tpl.roleId.toLowerCase())) {
+      specialists.push(tpl);
+      rationale.push(
+        zh
+          ? `新增自定义专员「${tpl.name.zh}」(权重 ${tpl.weight})`
+          : `Added custom specialist "${tpl.name.en}" (W${tpl.weight})`,
+      );
+    }
+  }
+
+  const discoveredById = new Map(
+    (input.discoveredSkills ?? []).map((s) => [s.skillId.toLowerCase(), s]),
+  );
+
+  // Spawn dedicated Specialist Roles directly from host's native SKILL.md skills!
+  const explicitSpawnIds = new Set(
+    (input.spawnRoleFromSkillIds ?? []).map((s) =>
+      s.trim().replace(/^spawn:/i, "").toLowerCase(),
+    ),
+  );
+  // Also allow passing `spawn:<skillId>` or `skill-<skillId>` inside `roleIds`!
+  for (const rid of input.roleIds ?? []) {
+    const lower = rid.trim().toLowerCase();
+    if (lower.startsWith("spawn:")) explicitSpawnIds.add(lower.slice(6));
+    else if (lower.startsWith("skill-") && discoveredById.has(lower.slice(6))) {
+      explicitSpawnIds.add(lower.slice(6));
+    }
+  }
+
+  // If autoTuneWeights is enabled and no explicit spawn list was given, auto-spawn workspace/user/plugin skills with strong relevance (>= 7)
+  if (explicitSpawnIds.size === 0 && input.autoTuneWeights !== false && discoveredById.size > 0) {
+    const rec = recommendSkillBindingsAndCandidates({
+      discoveredSkills: input.discoveredSkills ?? [],
+      goal: input.goal,
+      roles: specialists,
+    });
+    for (const cand of rec.candidateSkillRoles) {
+      if (
+        cand.score >= 7 &&
+        cand.skill.source !== "antigravity-builtin" &&
+        cand.skill.source !== "vetoboard-pack"
+      ) {
+        explicitSpawnIds.add(cand.skill.skillId.toLowerCase());
+      }
+    }
+  }
+
+  for (const skId of explicitSpawnIds) {
+    const sk = discoveredById.get(skId);
+    if (!sk) continue;
+    const synthesized = synthesizeRoleFromSkill(sk, locale, 90);
+    if (!excludeSet.has(synthesized.roleId.toLowerCase())) {
+      specialists.push(synthesized);
+      rationale.push(
+        zh
+          ? `由本机原生技能 \`${sk.name}\` 动态孵化专属角色「${synthesized.name.zh}」(权重 90)`
+          : `Synthesized specialist "${synthesized.name.en}" from native skill "${sk.name}" (W90)`,
+      );
+    }
+  }
+
+  if (specialists.length === 0) {
+    specialists = [{ ...findRoleTemplate(domain === "swe" ? "software-architect" : "market-analyst")! }];
+  }
+
+  const hasExplicitPrimary = (input.primaryRoleIds?.length ?? 0) > 0;
+  const autoTune = input.autoTuneWeights !== false && !hasExplicitPrimary;
+
+  if (autoTune && domain === "commercial") {
+    const isCompliance = COMPLIANCE_HEAVY_RE.test(input.goal);
+    const isFinance = FINANCE_HEAVY_RE.test(input.goal);
+    const isTech = TECH_HEAVY_RE.test(input.goal);
+    const isMarket = MARKET_HEAVY_RE.test(input.goal);
+
+    specialists = specialists.map((role) => {
+      if (role.roleId === "legal-advisor" && isCompliance) {
+        rationale.push(
+          zh
+            ? "识别到强合规/监管议题 → 提拔「合规与法律风控护栏官」为核心主导(96)"
+            : "Detected regulatory/compliance risk -> promoted Legal Guardrail to Primary Lead (W96)",
+        );
+        return { ...role, priorityTier: "primary", weight: 96 };
+      }
+      if (role.roleId === "profit-modeler" && isFinance) {
+        rationale.push(
+          zh
+            ? "识别到定价/退货率/盈亏测算诉求 → 提拔「精算建模专员」为核心主导(96)"
+            : "Detected pricing/BEP unit-economics focus -> promoted Profit Actuary to Primary Lead (W96)",
+        );
+        return { ...role, priorityTier: "primary", weight: 96 };
+      }
+      if (role.roleId === "tech-feasibility" && isTech) {
+        rationale.push(
+          zh
+            ? "识别到硬件BOM/高并发工程瓶颈 → 提拔「工程与交付专员」为核心主导(94)"
+            : "Detected BOM/engineering bottleneck -> promoted Engineering Specialist to Primary Lead (W94)",
+        );
+        return { ...role, priorityTier: "primary", weight: 94 };
+      }
+      if (role.roleId === "market-analyst" && !isMarket && (isCompliance || isTech)) {
+        return { ...role, priorityTier: "guardrail", weight: 86 };
+      }
+      return role;
+    });
+  }
+
+  // Apply explicit primaryRoleIds if user picked who leads
+  if (hasExplicitPrimary) {
+    const primarySet = new Set(input.primaryRoleIds!.map((s) => s.trim().toLowerCase()));
+    specialists = specialists.map((role) => {
+      if (primarySet.has(role.roleId.toLowerCase())) {
+        return {
+          ...role,
+          priorityTier: "primary",
+          weight: Math.max(role.weight, 95),
+        };
+      }
+      // Demote non-selected default primaries so user's chosen Primary Lead strictly leads
+      if (role.priorityTier === "primary") {
+        return {
+          ...role,
+          priorityTier: "guardrail",
+          weight: Math.min(role.weight, 86),
+        };
+      }
+      return role;
+    });
+    const leadNames = specialists
+      .filter((r) => r.priorityTier === "primary")
+      .map((r) => r.name[locale])
+      .join(zh ? "、" : ", ");
+    if (leadNames) {
+      rationale.push(
+        zh ? `人工指定核心主导：${leadNames}` : `User-selected Primary Lead(s): ${leadNames}`,
+      );
+    }
+  }
+
+  // Apply explicit tierOverrides, weightOverrides & modelOverrides
+  if (input.tierOverrides || input.weightOverrides || input.modelOverrides) {
+    specialists = specialists.map((role) => {
+      const nextTier = input.tierOverrides?.[role.roleId] ?? role.priorityTier;
+      const rawWeight = input.weightOverrides?.[role.roleId];
+      const nextWeight =
+        rawWeight !== undefined
+          ? Math.max(10, Math.min(100, Math.round(rawWeight)))
+          : role.weight;
+      const rawModel = input.modelOverrides?.[role.roleId];
+      const nextModel = rawModel ? normalizeRoleModelBinding(rawModel) : role.modelBinding;
+      return {
+        ...role,
+        ...(nextModel ? { modelBinding: nextModel } : {}),
+        priorityTier: nextTier,
+        weight: nextWeight,
+      };
+    });
+  }
+
+  // Mount bound native & pack skills onto each specialist role
+  const boundSkillsByRoleId: Record<string, string[]> = {};
+  if (discoveredById.size > 0) {
+    const autoSkillRec = recommendSkillBindingsAndCandidates({
+      discoveredSkills: input.discoveredSkills ?? [],
+      goal: input.goal,
+      roles: specialists,
+    });
+    const globalList = (input.globalSkillIds ?? []).map((x) => x.trim().toLowerCase());
+
+    specialists = specialists.map((role) => {
+      const isSynthesizedFromSkill = role.roleId.startsWith("skill-");
+      const synthSkillId = isSynthesizedFromSkill ? role.roleId.slice(6) : undefined;
+      const explicitForRole = input.roleSkillBindings?.[role.roleId];
+      const targetIds = new Set<string>(
+        explicitForRole
+          ? explicitForRole.map((s) => s.trim().toLowerCase())
+          : (autoSkillRec.recommendedBindings[role.roleId] ?? []),
+      );
+      for (const gid of globalList) targetIds.add(gid);
+      if (synthSkillId && discoveredById.has(synthSkillId)) {
+        targetIds.add(synthSkillId);
+      }
+
+      const attachable: DiscoveredSkill[] = [];
+      const recordedIds: string[] = [];
+      for (const tid of targetIds) {
+        const sk = discoveredById.get(tid);
+        if (!sk) continue;
+        recordedIds.push(sk.skillId);
+        // Synthesized skill-role already has its primary skill embedded in systemCharter
+        if (tid !== synthSkillId) {
+          attachable.push(sk);
+        }
+      }
+
+      if (recordedIds.length > 0) {
+        boundSkillsByRoleId[role.roleId] = recordedIds;
+      }
+      return attachable.length > 0
+        ? attachSkillsToRole(role, attachable, input.enforceHardSkillGate === true)
+        : role;
+    });
+  }
+
+  // Sort Wave 1 specialists by weight descending so the highest-authority Primary Lead sits at Track 1!
+  specialists.sort((a, b) => b.weight - a.weight);
+
+  const finalRoles: RoleTemplate[] = [...specialists];
+  if (includeInspector && !excludeSet.has("quality-inspector")) {
+    const inspector: RoleTemplate = { ...findRoleTemplate("quality-inspector")! };
+    if (input.weightOverrides?.["quality-inspector"] !== undefined) {
+      inspector.weight = Math.max(
+        10,
+        Math.min(100, Math.round(input.weightOverrides["quality-inspector"])),
+      );
+    }
+    const rawInspModel = input.modelOverrides?.["quality-inspector"];
+    if (rawInspModel) {
+      inspector.modelBinding = normalizeRoleModelBinding(rawInspModel);
+    }
+    finalRoles.push(inspector);
+  }
+
+  return { boundSkillsByRoleId, rationale, roles: finalRoles };
+}
+
+export const AUTO_RECOMMENDED_LEAD_OPTION_ID = "__auto_recommended_lead__";
+export const DEFAULT_FULL_LINEUP_OPTION_ID = "__default_full_lineup__";
+export const AUTO_BIND_SKILLS_OPTION_ID = "__auto_bind_skills__";
+export const WEIGHT_PRESET_AUTO = "__weight_auto__";
+export const WEIGHT_PRESET_SINGLE_DICTATOR = "__weight_single_99__";
+export const WEIGHT_PRESET_COMPLIANCE_FIRST = "__weight_compliance_98__";
+export const WEIGHT_PRESET_FINANCE_FIRST = "__weight_finance_98__";
+export const WEIGHT_PRESET_EQUAL = "__weight_equal_90__";
+
+/**
+ * Parses natural-language custom weight expressions entered in `ask_question` "Other" input,
+ * e.g. `"精算=98, automation:92, 市场 70, legal-advisor=96"`.
+ */
+export function parseCustomWeightText(
+  rawText: string | undefined,
+  availableRoles: readonly { readonly roleId: string; readonly title: string }[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!rawText?.trim()) return out;
+
+  const aliasMap: ReadonlyArray<readonly [RegExp, string]> = [
+    [/(?:profit-modeler|精算|单位经济|财务|盈利)/iu, "profit-modeler"],
+    [/(?:market-analyst|市场|重置天花板|选品)/iu, "market-analyst"],
+    [/(?:legal-advisor|合规|法务|法律|风控)/iu, "legal-advisor"],
+    [/(?:tech-feasibility|工程|技术可行|交付)/iu, "tech-feasibility"],
+    [/(?:software-architect|架构|7-gate)/iu, "software-architect"],
+    [/(?:quality-inspector|督察|质检|核账)/iu, "quality-inspector"],
+  ];
+
+  const segments = rawText.split(/[,，;；\n]+/);
+  for (const seg of segments) {
+    const m = /(.+?)\s*(?:=|:|：|\s)\s*(\d{2,3})\b/u.exec(seg.trim());
+    if (!m) continue;
+    const keyRaw = m[1]!.trim();
+    const num = Math.max(10, Math.min(100, Number(m[2])));
+    if (!Number.isFinite(num)) continue;
+
+    let matchedRoleId: string | undefined;
+    for (const r of availableRoles) {
+      if (
+        r.roleId.toLowerCase() === keyRaw.toLowerCase() ||
+        r.roleId.toLowerCase() === `skill-${keyRaw.toLowerCase()}` ||
+        r.title.toLowerCase().includes(keyRaw.toLowerCase())
+      ) {
+        matchedRoleId = r.roleId;
+        break;
+      }
+    }
+    if (!matchedRoleId) {
+      for (const [re, id] of aliasMap) {
+        if (re.test(keyRaw)) {
+          matchedRoleId = id;
+          break;
+        }
+      }
+    }
+    if (matchedRoleId) {
+      out[matchedRoleId] = num;
+    }
+  }
+  return out;
+}
+
+/**
+ * Generates zero-conflict IDE-native interactive selector questions (`ask_question` compatible)
+ * covering ALL FOUR dimensions without overlapping umbrella items:
+ * 1. Active Roles + Native Skill -> Role synthesis (`q_active_roles`, check ONLY who participates — zero conflict!)
+ * 2. Primary Lead selection (`q_primary_leads`, single or multi-lead)
+ * 3. Weight Distribution Preset + Custom Numeric Input via "Other" (`q_role_weights`)
+ * 4. Mounting Specific Native / VetoBoard Skills (`q_skill_bindings`)
+ */
+export function buildLineupSelectorPlan(params: {
+  readonly goal: string;
+  readonly domain?: "commercial" | "swe";
+  readonly discoveredSkills?: readonly DiscoveredSkill[];
+  readonly locale?: VetoBoardLocale;
+}): {
+  readonly locale: VetoBoardLocale;
+  readonly discoveredNativeSkills: readonly {
+    readonly skillId: string;
+    readonly name: string;
+    readonly source: string;
+    readonly description: string;
+  }[];
+  readonly recommendedLineup: readonly {
+    readonly roleId: string;
+    readonly title: string;
+    readonly priorityTier: RolePriorityTier;
+    readonly tierLabel: string;
+    readonly weight: number;
+    readonly wave: number;
+    readonly boundSkills: readonly string[];
+  }[];
+  readonly rationale: readonly string[];
+  readonly questions: readonly ClarifyQuestion[];
+} {
+  const locale = params.locale ?? "en";
+  const zh = locale === "zh";
+  const discovered = params.discoveredSkills ?? [];
+  const resolved = resolveCouncilLineup({
+    autoTuneWeights: true,
+    discoveredSkills: discovered,
+    domain: params.domain,
+    goal: params.goal,
+    locale,
+  });
+
+  const skillRec = recommendSkillBindingsAndCandidates({
+    discoveredSkills: discovered,
+    goal: params.goal,
+    roles: resolved.roles,
+  });
+
+  const specialists = resolved.roles.filter((r) => r.kind !== "inspector");
+
+  const topSkillSpawnOptions = skillRec.candidateSkillRoles.slice(0, 4).map(({ skill }) => ({
+    description: zh
+      ? `[本机原生技能:${skill.source}] 勾选后直接将该原生技能孵化为一名独立专员参审`
+      : `[Native Skill:${skill.source}] Spawn a dedicated specialist role from "${skill.name}"`,
+    label: zh
+      ? `✨ [原生技能→生成角色] ${skill.name}`
+      : `✨ [Spawn Role from Skill] ${skill.name}`,
+    optionId: `spawn:${skill.skillId}`,
+  }));
+
+  const mountableSkillOptions = discovered.slice(0, 6).map((sk) => ({
+    description: `[${sk.source}] ${sk.description.slice(0, 90)}`,
+    label: `${sk.name} (${sk.skillId})`,
+    optionId: sk.skillId,
+  }));
+
+  const questions: ClarifyQuestion[] = [
+    {
+      options: [
+        ...specialists.map((r, idx) => ({
+          description: `${resolveTierLabel(r, locale)} · 默认权重 ${r.weight}`,
+          label: `${idx === 0 ? "(Recommended) " : ""}${r.name[locale]} (${r.roleId} · W${r.weight})`,
+          optionId: r.roleId,
+        })),
+        ...topSkillSpawnOptions,
+      ],
+      question: zh
+        ? "1/4 【上场角色选择（多选：勾谁谁上场，不勾则不上，互不冲突）】省流建议勾 2~3 项（独立督察官会自动殿后核账）："
+        : "1/4 [Active Roles (Multi-select: check ONLY who participates)] Pick 2-3 tracks for lean quota:",
+      questionId: "q_active_roles",
+      selectionMode: "multiple",
+    },
+    {
+      options: specialists.map((r, idx) => ({
+        description: zh
+          ? `设为【核心主导】(权重≥95)，当各轨结论分歧时优先采信该角色`
+          : `Set ${r.name.en} as Primary Lead (W>=95) in conflict resolution`,
+        label: `${idx === 0 ? "(Recommended) " : ""}${r.name[locale]} (${r.roleId})`,
+        optionId: r.roleId,
+      })),
+      question: zh
+        ? "2/4 【核心主导（建议选 1~2 项）】当各角色意见打架时，最终以谁为主裁？（选 1 个=单核拍板，选多个=联席主裁）"
+        : "2/4 [Primary Lead] Who holds decisive authority when specialists disagree?",
+      questionId: "q_primary_leads",
+      selectionMode: "multiple",
+    },
+    {
+      options: [
+        {
+          description: zh
+            ? "按课题风险自动分配梯度（核心主导 96 / 护栏 85 / 辅助 75）"
+            : "Task-aware gradient (Primary 96 / Guardrail 85 / Support 75)",
+          label: zh
+            ? "(Recommended) VetoBoard 智能风险梯度权重（96 / 85 / 75）"
+            : "(Recommended) Smart Risk-Weighted Gradient (96 / 85 / 75)",
+          optionId: WEIGHT_PRESET_AUTO,
+        },
+        {
+          description: zh
+            ? "把你选的第 1 主导拉满 99 绝对一票拍板，其余参审角色压至 75 仅做挑刺补充"
+            : "First Primary Lead at W99 decisive authority; other tracks at W75 advisory",
+          label: zh
+            ? "强主裁一票制（第一主导 99 vs 其余 75）"
+            : "Strong Single-Lead Authority (99 vs 75)",
+          optionId: WEIGHT_PRESET_SINGLE_DICTATOR,
+        },
+        {
+          description: zh
+            ? "精算建模专员拉满 98（ROI/回本算不过直接一票否决），其余 82"
+            : "Profit & BEP Actuary at W98; others at W82",
+          label: zh
+            ? "财务/ROI 铁算盘优先（精算 98 vs 其余 82）"
+            : "Unit-Economics & ROI First (Profit 98 vs 82)",
+          optionId: WEIGHT_PRESET_FINANCE_FIRST,
+        },
+        {
+          description: zh
+            ? "合规风控官拉满 98（法务/隐私踩线直接一票否决），其余 82"
+            : "Compliance & Legal Guardrail at W98; others at W82",
+          label: zh
+            ? "法务合规风控优先（合规 98 vs 其余 82）"
+            : "Compliance & Legal Redline First (Legal 98 vs 82)",
+          optionId: WEIGHT_PRESET_COMPLIANCE_FIRST,
+        },
+        {
+          description: zh
+            ? "所有上场专员统一权重 90 平票辩论"
+            : "All participating specialists at equal W90",
+          label: zh
+            ? "全员平权对等博弈（全部 90）"
+            : "Equal-Weight Peer Debate (All 90)",
+          optionId: WEIGHT_PRESET_EQUAL,
+        },
+      ],
+      question: zh
+        ? "3/4 【权重调整（单选预设，或点底部「其他」直接手输任意 10-100 权重，如：精算=98, automation=92, 市场=70）】"
+        : "3/4 [Weight Tuning] Pick a preset OR click 'Other' to type exact 10-100 weights (e.g. profit-modeler=98, automation=92)",
+      questionId: "q_role_weights",
+      selectionMode: "single",
+    },
+    ...(mountableSkillOptions.length > 0
+      ? [
+          {
+            options: [
+              {
+                description: zh
+                  ? "按角色职责自动挂载匹配的技能包（无需手工逐个挑）"
+                  : "Automatically mount matching skills per role",
+                label: zh
+                  ? `(Recommended) 智能按需自动挂载`
+                  : `(Recommended) Auto-mount matching skills`,
+                optionId: AUTO_BIND_SKILLS_OPTION_ID,
+              },
+              ...mountableSkillOptions,
+            ],
+            question: zh
+              ? "4/4 【挂载技能包（单选第 1 项自动挂载，或手动勾选指定技能）】"
+              : "4/4 [Skill Mounting] Auto-mount (Option 1) or manually pick skills:",
+            questionId: "q_skill_bindings",
+            selectionMode: "multiple" as const,
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    discoveredNativeSkills: discovered.map((s) => ({
+      description: s.description,
+      name: s.name,
+      skillId: s.skillId,
+      source: s.source,
+    })),
+    locale,
+    questions,
+    rationale: resolved.rationale,
+    recommendedLineup: resolved.roles.map((r) => ({
+      boundSkills: resolved.boundSkillsByRoleId[r.roleId] ?? [],
+      priorityTier: r.priorityTier,
+      roleId: r.roleId,
+      tierLabel: resolveTierLabel(r, locale),
+      title: r.name[locale],
+      wave: r.kind === "inspector" ? 2 : 1,
+      weight: r.weight,
+    })),
+  };
+}
+
+export function renderRoleCharterPrompt(
+  role: RoleTemplate,
+  locale: VetoBoardLocale = "en",
+): string {
+  const dict = t(locale);
+  const zh = locale === "zh";
+  const tierLabel =
+    role.kind === "inspector"
+      ? dict.tierInspector
+      : role.priorityTier === "primary"
+        ? dict.tierPrimary
+        : role.priorityTier === "guardrail"
+          ? role.domain === "engineering"
+            ? dict.tierGuardrailEng
+            : dict.tierGuardrailLegal
+          : dict.tierSupport;
+
+  const memorialRule = zh
+    ? "- **呈批摘要卡规范（零额外请求瘦身）**：请在正文主标题下方顺手输出 4~6 行 `### 呈批摘要卡`（核心定论与底数、硬红线/排除项、上下游口径如是否含税运包装）。"
+    : "- **Structured Memorial Card Rule (0-extra-turn compression)**: Right below your main title, include a 4-6 bullet `### Executive Memorial` summarizing key numeric baselines, hard redlines, and accounting boundaries (e.g. whether BOM includes packaging/shipping).";
+
+  const rulesBlock = formatExecutableRulesForPrompt(role.executableRules, locale);
+  const evHeader = zh ? "## 强制交付凭证要求" : "## Mandatory Evidence Requirements";
+
+  return [
+    `# ${role.name[locale]} (\`${role.roleId}\` · ${tierLabel} · Weight ${role.weight}/100)`,
+    "",
+    role.systemCharter[locale],
+    "",
+    memorialRule,
+    "",
+    evHeader,
+    ...role.evidenceRequirements.map((req) => `- ${req}`),
+    ...(rulesBlock ? ["", rulesBlock] : []),
+  ].join("\n");
+}
+
+export function createStarterAssetPack(): VetoBoardAssetPack {
+  return {
+    author: "VetoBoard Contributors",
+    description: {
+      en: "Starter bilingual governance pack: 6 weighted commercial & 7-Gate SWE role charters with deterministic math & anti-stub gates.",
+      zh: "双语入门治理资产包：内置商业证伪与 Google 7-Gate 研发 6 大权重角色宪章、确定性算账门禁与反假实现硬规则。",
+    },
+    exportedAt: "2026-11-24T00:00:00.000Z",
+    format: "vetoboard-asset-pack",
+    name: {
+      en: "VetoBoard Starter Governance & Decision Pack",
+      zh: "VetoBoard 入门决策与研发治理标准包",
+    },
+    packId: "starter-governance-v1",
+    roles: [...BUILTIN_ROLE_TEMPLATES],
+    schemaVersion: 1,
+    skills: [
+      {
+        content: {
+          en: "## Replacement-Cost Ceiling Sanity Gate\n1. Never price a repair/retrofit above 35%-50% of a comparable brand-new unit.\n2. Always include founder labor opportunity cost before claiming positive economic profit.",
+          zh: "## 新品重置成本天花板与真实经济利润核验\n1. 维修/改造综合报价严禁击穿同档新品重置价的 35%~50% 生死线；\n2. 测算单干/自营利润时必须扣除创始人自身合理机会成本工资与税费，严禁把血汗工时包装成资本回报。",
+        },
+        skillId: "first-principles-unit-sanity",
+        title: {
+          en: "First-Principles Replacement Ceiling & Economic Profit Gate",
+          zh: "第一性原理重置价天花板与真实经济利润门禁",
+        },
+      },
+      {
+        content: {
+          en: "## 7-Gate Software Delivery Discipline\n1. Define Non-Goals & WHEN/THEN acceptance scenarios before editing files.\n2. Ship shared types/contracts first, enforce non-overlapping OWNERS directories across parallel tracks, and require hermetic unit tests before marking passed.",
+          zh: "## Google 7-Gate 软件工程交付纪律\n1. 动代码前先明确 Non-Goals 与『当…那么…』验收判据；\n2. 契约先行锁定共享接口，同波次严格隔离 OWNERS 文件边界，且必须附带密封单测验证通过后方可结项。",
+        },
+        skillId: "7-gate-swe-verification",
+        title: {
+          en: "7-Gate Contract-First & Hermetic Test Discipline",
+          zh: "7-Gate 契约先行与密封单测工程纪律",
+        },
+      },
+    ],
+  };
+}
