@@ -1,6 +1,7 @@
 export * from "./i18n/locales.js";
 export * from "./core/types.js";
 export * from "./core/quantitativeCalc.js";
+export * from "./core/researchBudget.js";
 export * from "./core/memorialCard.js";
 export * from "./core/ruleGate.js";
 export * from "./core/roleCatalog.js";

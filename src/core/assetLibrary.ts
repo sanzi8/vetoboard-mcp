@@ -16,6 +16,7 @@ import {
   roleTemplateSchema,
   vetoboardAssetPackSchema,
   type ClarifyQuestion,
+  type HostModelCandidate,
   type RolePriorityTier,
   type RoleTemplate,
 } from "./types.js";
@@ -516,6 +517,8 @@ export function renderConversationalPreflightBriefing(params: {
   readonly goal: string;
   readonly locale: VetoBoardLocale;
   readonly retrieved: RetrieveReusableAssetsResult;
+  readonly hostModels?: readonly HostModelCandidate[];
+  readonly hostPlatform?: string;
   readonly recommendedLineup: readonly {
     readonly roleId: string;
     readonly title: string;
@@ -524,10 +527,12 @@ export function renderConversationalPreflightBriefing(params: {
     readonly weight: number;
     readonly wave: number;
     readonly boundSkills: readonly string[];
+    readonly recommendedModelId?: string;
+    readonly recommendedModelLabel?: string;
   }[];
   readonly rationale: readonly string[];
 }): string {
-  const { locale, retrieved, recommendedLineup, rationale } = params;
+  const { locale, retrieved, recommendedLineup, rationale, hostModels, hostPlatform } = params;
   const zh = locale === "zh";
 
   const savedLibCount = retrieved.roles.filter((r) => r.origin === "vetoboard-library").length;
@@ -555,6 +560,9 @@ export function renderConversationalPreflightBriefing(params: {
         : item.roleId === "quality-inspector"
           ? "`vetoboard_calc`"
           : "—";
+    const modelStr = item.recommendedModelLabel
+      ? `\`${item.recommendedModelLabel}\``
+      : "`inherit`";
     const reason = explainRoleScore(
       item.roleId,
       item.priorityTier,
@@ -562,8 +570,21 @@ export function renderConversationalPreflightBriefing(params: {
       locale,
       rationale,
     );
-    return `| ${i + 1}. **${item.title}** (\`${item.roleId}\`) | ${originLabel(item.roleId)} | ${skillsStr} | **${item.tierLabel} · \`${item.weight}\` 分** | ${reason} |`;
+    return `| ${i + 1}. **${item.title}** (\`${item.roleId}\`) | ${originLabel(item.roleId)} | ${skillsStr} | ${modelStr} | **${item.tierLabel} · \`${item.weight}\` 分** | ${reason} |`;
   });
+
+  const modelMenuLine =
+    hostModels && hostModels.length > 0
+      ? hostModels
+          .slice(0, 12)
+          .map(
+            (m) =>
+              `\`${m.label ?? m.id}\`${m.quotaRemaining ? `(${m.quotaRemaining})` : ""}`,
+          )
+          .join(" · ") + (hostModels.length > 12 ? ` …(+${hostModels.length - 12})` : "")
+      : zh
+        ? "通用档位 `pro` (旗舰强推理) · `inherit` (均衡主力) · `flash` (高速轻量) · 或任意具体模型名（如 `opus`/`sonnet`/`haiku`、`gpt-5`/`o3`、或 BYOK `deepseek-reasoner`）"
+        : "Universal tiers `pro` (Frontier) · `inherit` (Balanced) · `flash` (Fast) · or any concrete model ID (`opus`/`sonnet`/`haiku`, `gpt-5`/`o3`, or BYOK `deepseek-reasoner`)";
 
   const gapSkills = retrieved.unhatchedSkills.slice(0, 6);
   const gapLine =
@@ -598,17 +619,19 @@ export function renderConversationalPreflightBriefing(params: {
             ...kbLines,
           ]
         : []),
-      `- **📋 动态共享白板与 ELECTRE+QMV 数学裁决引擎（默认激活）**：**① 并发备课贴白板** → **② 全员阅板留痕（赞同吸收 vs 动态维度拉人协商，防混战）** → **③ 运筹学数学支配裁决（对决支配率 D ≥ 60%/65% · 全场和谐度 C ≥ 66.7% · 席位比 ≥ 50% · R≤2 零变化早停转人工）** → **④ 并发定稿 + [V1] 终检存知识库 & 退回普通对话**！`,
+      `- **🌐 全课题强制先联网实证 + Effort-Scaling 配额上限**：上白板前必先执行联网检索锚定真实在售三档具体型号/现价/现行法规/官方文档（附真实 \`https://\` 链接），同时严控检索配额上限（白板摸底 ≤5~8 次、重度执行 ≤12~18 次，2 次无果立即标 \`【待确认】\` 止损防死循环）！`,
+      `- **📋 动态共享白板与 ELECTRE+QMV 数学裁决引擎（默认激活）**：**① 并发联网备课贴白板** → **② 全员阅板留痕（赞同吸收 vs 动态维度拉人协商，防混战）** → **③ 运筹学数学支配裁决（D ≥ 60%/65% · C ≥ 66.7% · 席位 ≥ 50% · R≤2 零变化早停转人工）** → **④ 并发定稿 + [V1] 终检存知识库 & 退回普通对话**！`,
       "",
-      "| 拟上场席位 | 资产来源 | 自动挂载技能 | 推荐定位 & 权重分 | 为什么推荐这个分数？（定权依据） |",
-      "| :--- | :--- | :--- | :--- | :--- |",
+      "| 拟上场席位 | 资产来源 | 自动挂载技能 | 推荐运行模型（可改） | 推荐定位 & 权重分 | 为什么推荐这个分数？（定权依据） |",
+      "| :--- | :--- | :--- | :--- | :--- | :--- |",
       ...rows,
       "",
+      `- **🎯 当前平台可选模型池${hostPlatform ? ` (${hostPlatform})` : ""}**：${modelMenuLine}`,
       `- **✨ 可一键孵化为新角色的本机原生技能**（用后自动沉淀进复用库）：${gapLine}`,
       "",
-      "> **💬 请确认或直接对话微调**：",
-      "> - 认可上述推荐（或想省 Token 精简）：直接回复 **「开跑」**，或随口说 **「只留前 2 个角色开跑」** / **「不挂旧知识卡开跑」**；",
-      "> - 想改分数 / 换主导 / 从技能加人：直接用自然语言说即可（例如：**「把合规提到 98 主导，再把 automation 技能孵化上场给 90 分」**）。",
+      "> **💬 请确认或直接对话选模型 / 调权重**：",
+      "> - 认可上述推荐与模型搭配：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
+      "> - **想自由换模型 / 改分数 / 加技能角色**：直接用自然语言说即可（例如：**「精算用 Claude Opus，市场用 Gemini 4，督察用 GPT-OSS 120B，工程降到 55 分开跑」** 或 **「精算用 opus，工程用 haiku」**）。",
     ].join("\n");
   }
 
@@ -623,16 +646,18 @@ export function renderConversationalPreflightBriefing(params: {
           ...kbLines,
         ]
       : []),
-    `- **📋 Dynamic Shared Whiteboard & ELECTRE+QMV Engine (Default)**: **① Concurrent Prep & Post to Board** -> **② Review & React (Approve/Absorb vs Dynamic Dimension Consultation)** -> **③ Mathematical Dominance Gate (D >= 60%/65%, C >= 66.7%, Seats >= 50%, R<=2 Early Stop)** -> **④ Parallel Finalize + [V1] Audit, Knowledge Save & Exit**.`,
+    `- **🌐 Mandatory Live Web Grounding + Effort-Scaling Search Quota**: All domains must verify live primary URLs first while obeying strict 20/60/20 search ceilings (<=5-8 calls on board prep, <=12-18 on deep research; immediate \`[ASSUMPTION]\` stop-loss after 2 empty queries).`,
+    `- **📋 Dynamic Shared Whiteboard & ELECTRE+QMV Engine (Default)**: **① Concurrent Web-Grounded Prep & Post** -> **② Review & React** -> **③ Mathematical Dominance Gate (D >= 60%/65%, C >= 66.7%, Seats >= 50%, R<=2 Early Stop)** -> **④ Parallel Finalize + [V1] Audit, Knowledge Save & Exit**.`,
     "",
-    "| Proposed Seat | Asset Origin | Mounted Skills | Tier & Score | Why This Score? |",
-    "| :--- | :--- | :--- | :--- | :--- |",
+    "| Proposed Seat | Asset Origin | Mounted Skills | Recommended Model (Editable) | Tier & Score | Why This Score? |",
+    "| :--- | :--- | :--- | :--- | :--- | :--- |",
     ...rows,
     "",
+    `- **🎯 Available Models${hostPlatform ? ` (${hostPlatform})` : ""}**: ${modelMenuLine}`,
     `- **✨ Native Skills Available to Hatch into Reusable Roles**: ${gapLine}`,
     "",
-    "> **💬 Confirm or Adjust in Plain Language**:",
-    "> - Reply **\"Go\"** (or **\"Run only #1 and #2\"** / **\"Go without old knowledge cards\"**);",
-    "> - Or tweak anything naturally (e.g. **\"Set legal-advisor to 98 Primary Lead and hatch `automation` at 90\"**).",
+    "> **💬 Confirm or Pick Models / Weights in Plain Language**:",
+    "> - Reply **\"Go\"** (or **\"Run only #1 and #2\"**);",
+    "> - Or customize models & scores naturally (e.g. **\"Use opus for profit-modeler, haiku for tech-feasibility, and set legal-advisor to 98\"**).",
   ].join("\n");
 }

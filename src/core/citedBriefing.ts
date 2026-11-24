@@ -1,6 +1,7 @@
 import type { VetoBoardLocale } from "../i18n/locales.js";
 import { formatDeliberationLogForReport } from "./deliberationEngine.js";
 import { extractArtifactSections } from "./memorialCard.js";
+import { extractVerifiedHttpUrls } from "./researchBudget.js";
 import type { CatchEvent, DeliberationOpinion } from "./types.js";
 
 /**
@@ -654,21 +655,35 @@ export function assembleDualLayerReport(params: {
     );
   }
 
+  const allDeliveredText = [
+    ...index.entries.map((e) => e.rawMarkdown),
+    params.verificationMarkdown ?? "",
+  ].join("\n\n");
+  const verifiedWebUrlsCount = extractVerifiedHttpUrls(allDeliveredText).length;
+
   const readinessRating =
-    seal && seal.calcChecksCount >= 1 && hasVerify
+    verifiedWebUrlsCount >= 3 && seal && seal.calcChecksCount >= 1 && hasVerify
       ? zh
-        ? "`已验证（Verified · 确定性复算与独立终验闭环）`"
-        : "`Verified (Deterministic Calc + Independent Audit)`"
-      : zh
-        ? "`模型推算（Modeled）`"
-        : "`Modeled`";
+        ? "`已验证（Verified · 具备实时联网一手信源 + 确定性复算 + 独立终验闭环）`"
+        : "`Verified (Live Web Sources + Deterministic Calc + Independent Audit)`"
+      : seal && seal.calcChecksCount >= 1
+        ? zh
+          ? `\`模型推算（Model-Derived · 已完成确定性算账，但实时外部信源仅 ${verifiedWebUrlsCount} 条，含待确认假设）\``
+          : `\`Model-Derived (Deterministic Calc verified; ${verifiedWebUrlsCount} live external URLs)\``
+        : verifiedWebUrlsCount >= 1 && hasVerify
+          ? zh
+            ? "`条件性建议（Conditional · 已具备联网核验信源与督察复核）`"
+            : "`Conditional Advisory (Web-grounded & inspected)`"
+          : zh
+            ? "`待确认（Unverified · 缺少实时联网外部信源支撑）`"
+            : "`Unverified (Missing live external web sources)`";
 
   const readinessSection = zh
     ? [
         "## 决策可用度与核验覆盖审计",
         "",
         `- **四级决策可用度评级**: ${readinessRating}`,
-        `- **外部实证/法规基准核验**: 已覆盖 **${seal?.sourcesCount ?? index.entries.length} 项依据凭证**`,
+        `- **实时联网外部信源（\`WebSearch / search_web\`）**: 已采集 **${verifiedWebUrlsCount} 条真实外部 URL 凭证**（法规/文档基准共 **${seal?.sourcesCount ?? index.entries.length} 项**）`,
         `- **确定性定量引擎核算（\`vetoboard_calc\`）**: 已复算 **${seal?.calcChecksCount ?? 1} 项公式与敏感度指标**`,
         `- **独立终验与偏差拦截**: ${hasVerify ? "已通过 `[V1]` 独立只读复核" : "已完成规则门禁校验"}（累计拦截修正 **${seal?.catchesCount ?? 0} 处潜在偏差**）`,
       ].join("\n")
@@ -676,7 +691,7 @@ export function assembleDualLayerReport(params: {
         "## Decision Readiness & Verification Coverage Audit",
         "",
         `- **Readiness Tier**: ${readinessRating}`,
-        `- **Empirical & Statutory References**: **${seal?.sourcesCount ?? index.entries.length} verified references**`,
+        `- **Live External Web URLs (\`WebSearch / search_web\`)**: **${verifiedWebUrlsCount} verified external URLs** (**${seal?.sourcesCount ?? index.entries.length} total references**)`,
         `- **Deterministic Math (\`vetoboard_calc\`)**: **${seal?.calcChecksCount ?? 1} reconciled metrics**`,
         `- **Independent Audit**: ${hasVerify ? "Passed `[V1]` read-only reconciliation" : "Passed rule gate"} (**${seal?.catchesCount ?? 0} catches**)`,
       ].join("\n");

@@ -283,7 +283,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
             "| Retry DLQ | 1,500 req/s | Postgres Partitioned | 180ms |",
             "",
             "## 2. Failure Isolation",
-            "Per-tenant token buckets isolate noisy neighbors within 5 seconds.",
+            "Per-tenant token buckets isolate noisy neighbors within 5 seconds (ref: https://kafka.apache.org/documentation/ & https://redis.io/docs/latest/develop/data-types/streams/).",
           ].join("\n"),
           summaryLine: "Partitioned Kafka + bounded backoff architecture verified",
           taskId: taskIdA,
@@ -312,7 +312,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
           "| 3x Kafka Brokers | c7g.xlarge | $410 |",
           "| Worker Pool | 6x c7g.large | $390 |",
           "",
-          "Total infra cost is $800/mo (`$0.00031` per 10k deliveries).",
+          "Total infra cost is $800/mo (`$0.00031` per 10k deliveries, AWS Graviton pricing: https://aws.amazon.com/ec2/pricing/on-demand/).",
         ].join("\n"),
         taskId: taskIdA,
         trackId: recordA.tracks[1]!.trackId,
@@ -477,9 +477,10 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
           apiKey: "sk-user-relay-key",
           executionMode: "byok",
           goal: "Verify rate-limiter middleware implementation",
+          invokedTools: ["search_web"],
           lang: "en",
           modelId: "deepseek-reasoner-relay",
-          outputText: "Implemented token-bucket limiter with hermetic unit tests passing.",
+          outputText: "Implemented token-bucket limiter with hermetic unit tests passing (RFC 6585: https://datatracker.ietf.org/doc/html/rfc6585).",
           roleId: "software-architect",
         },
         name: "vetoboard_audit_output",
@@ -767,7 +768,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
           "# 合规与法律风控审计报告",
           "",
           "### 呈批摘要卡",
-          "- **硬红线排雷**：境内个人直接开海外 Stripe 极易触发 KYC 封号死穴，必须改走 Lemon Squeezy (MoR) 综合抽成 10.56%。",
+          "- **硬红线排雷**：境内个人直接开海外 Stripe 极易触发 KYC 封号死穴，必须改走 Lemon Squeezy (MoR) 综合抽成 10.56%（条款：https://docs.lemonsqueezy.com/help/getting-started/fees）。",
           "",
           "### 横向交锋与上游回应",
           "- 点名推翻 `[S1]` 沿用的 6% Stripe 抽成假设，强制替换为 MoR 10.56% 合法收款口径。",
@@ -1015,7 +1016,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       }),
       client.callTool({
         arguments: {
-          markdown: "# 合规底稿\n### 呈批摘要卡\n- 采用 Lemon Squeezy MoR 代扣全球 VAT，签订 Zero-Data-Retention DPA，ToS 锁死 12 个月责任上限。",
+          invokedTools: ["search_web"],
+          markdown: "# 合规底稿\n### 呈批摘要卡\n- 采用 Lemon Squeezy MoR 代扣全球 VAT（https://www.lemonsqueezy.com/pricing），签订 Zero-Data-Retention DPA，ToS 锁死 12 个月责任上限。",
           taskId: taskId1,
           trackId: p1Init.tracks[1]!.trackId,
         },
@@ -1023,7 +1025,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       }),
       client.callTool({
         arguments: {
-          markdown: "# 工程底稿\n### 呈批摘要卡\n- GitHub App 最小只读权限 + Cloudflare Workers Cron，单团队成本 $0.35/月，MVP 45 工时。",
+          invokedTools: ["search_web"],
+          markdown: "# 工程底稿\n### 呈批摘要卡\n- GitHub App 最小只读权限 + Cloudflare Workers Cron（https://developers.cloudflare.com/workers/platform/pricing/），单团队成本 $0.35/月，MVP 45 工时。",
           taskId: taskId1,
           trackId: p1Init.tracks[2]!.trackId,
         },
@@ -1164,7 +1167,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     const postResults = await Promise.all([
       client.callTool({
         arguments: {
-          markdown: "B2B 采购经理刚需 PDF 高管汇报件，砍掉将流失 40% 付费转化。",
+          invokedTools: ["search_web"],
+          markdown: "B2B 采购经理刚需 PDF 高管汇报件（竞品基准 https://linear.app/pricing），砍掉将流失 40% 付费转化。",
           stage: "board_post",
           taskId: taskIdA,
           trackId: mktTrack!.trackId,
@@ -1184,7 +1188,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       }),
       client.callTool({
         arguments: {
-          markdown: "基础 Webhook 数据管线 30 工时可交付，PDF 排版增加额外维护负担。",
+          invokedTools: ["search_web"],
+          markdown: "基础 Webhook 数据管线 30 工时可交付（Cloudflare Browser Rendering https://developers.cloudflare.com/browser-rendering/），PDF 排版增加额外维护负担。",
           stage: "board_post",
           taskId: taskIdA,
           trackId: techTrack!.trackId,
@@ -1244,7 +1249,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     await Promise.all([
       client.callTool({
         arguments: {
-          markdown: "# 市场底稿\n### 呈批摘要卡\n- 锁定 $29/月含 PDF 高管简报。",
+          invokedTools: ["search_web"],
+          markdown: "# 市场底稿\n### 呈批摘要卡\n- 锁定 $29/月含 PDF 高管简报（对标 https://linear.app/pricing 与 https://swarmia.com/pricing/）。",
           taskId: taskIdA,
           trackId: mktTrack!.trackId,
         },
@@ -1261,7 +1267,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       }),
       client.callTool({
         arguments: {
-          markdown: "# 工程底稿\n### 呈批摘要卡\n- 按白板锁死契约排期 44h，采用异步队列隔离 PDF 渲染超时风险。",
+          invokedTools: ["search_web"],
+          markdown: "# 工程底稿\n### 呈批摘要卡\n- 按白板锁死契约排期 44h，采用异步队列隔离 PDF 渲染超时风险（https://developers.cloudflare.com/queues/）。",
           taskId: taskIdA,
           trackId: techTrack!.trackId,
         },
@@ -1334,7 +1341,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       specTracksB.map((tr) =>
         client.callTool({
           arguments: {
-            markdown: `${tr.roleLabel} 首轮备课指标已就绪`,
+            invokedTools: ["search_web"],
+            markdown: `${tr.roleLabel} 首轮备课指标已就绪（实证基准 https://echarts.apache.org/zh/index.html）`,
             stage: "board_post",
             taskId: taskIdB,
             trackId: tr.trackId,
@@ -1435,7 +1443,8 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
       tracksC.map((tr) =>
         client.callTool({
           arguments: {
-            markdown: `${tr.roleLabel} 上板测试指标`,
+            invokedTools: ["search_web"],
+            markdown: `${tr.roleLabel} 上板测试指标（实证 https://stripe.com/pricing）`,
             stage: "board_post",
             taskId: taskIdC,
             trackId: tr.trackId,
@@ -1715,5 +1724,161 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     } finally {
       await new Promise<void>((r) => mockServer.close(() => r()));
     }
+  });
+
+  it("enforces Universal Web-Grounding Hard Gate across Commercial & SWE, Effort-Scaling Search Quotas, Honest Readiness Downgrade, and Cross-Platform hostModels Picker", async () => {
+    // === 1. Cross-Platform `hostModels` Pre-Flight Model Picker + Cross-Vendor Inspector Auto-Pairing ===
+    const planWithModels = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            goal: "评估实验室通用小设备第三方维修获客与单人产能上限",
+            hostModels: [
+              {
+                family: "claude",
+                id: "claude-opus-4-6-thinking",
+                label: "Claude Opus 4.6 (Thinking)",
+                quotaRemaining: "100%",
+                tier: "frontier",
+              },
+              {
+                family: "gemini",
+                id: "gemini-4-hydrogen-medium",
+                label: "Gemini 4 Hydrogen (Medium)",
+                quotaRemaining: "79%",
+                tier: "balanced",
+              },
+              {
+                family: "gemini",
+                id: "gemini-3.8-flash-high",
+                label: "Gemini 3.8 Flash (High)",
+                quotaRemaining: "79%",
+                tier: "fast",
+              },
+              {
+                family: "openai",
+                id: "gpt-oss-120b-medium",
+                label: "GPT-OSS 120B (Medium)",
+                quotaRemaining: "100%",
+                tier: "balanced",
+              },
+            ],
+            hostPlatform: "antigravity",
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    expect(planWithModels.briefingMarkdown).toContain("推荐运行模型（可改）");
+    expect(planWithModels.briefingMarkdown).toContain("Claude Opus 4.6 (Thinking) · 100%");
+    expect(planWithModels.briefingMarkdown).toContain("当前平台可选模型池 (antigravity)");
+
+    // Verify Primary Lead gets Claude Opus (`frontier`) while `quality-inspector` gets a DIFFERENT family (`gemini` or `openai`)!
+    const leadRec = planWithModels.recommendedLineup[0];
+    const inspectorRec = planWithModels.recommendedLineup.find(
+      (x: { roleId: string }) => x.roleId === "quality-inspector",
+    );
+    expect(leadRec.recommendedModelId).toBe("claude-opus-4-6-thinking");
+    expect(inspectorRec.recommendedModelId).not.toContain("claude");
+
+    // === 2. Universal Web-Grounding Hard Gate on SWE Domain (`board_post` AND `deliverable`) + Effort-Scaling Quota ===
+    const startSwe = firstText(
+      await client.callTool({
+        arguments: {
+          domain: "swe",
+          effortProfile: "fast",
+          executionMode: "host-subscription",
+          goal: "构建高并发多租户事件总线并评估云成本",
+          lang: "zh",
+          lineupConfirmed: true,
+        },
+        name: "vetoboard_start_council",
+      }),
+    );
+    // Verify Effort-Scaling Search Quota & 20/60/20 stop-loss directive are injected into role charters!
+    expect(startSwe).toContain("20 / 60 / 20 漏斗止损铁律");
+    expect(startSwe).toContain("联网搜索/抓取总次数上限");
+    expect(startSwe).toContain("严禁使用无网络权限的只读沙箱");
+
+    const sweTaskId = /watch\s+(vb_[a-z0-9_]+)/i.exec(startSwe)![1]!;
+    const sweTask = (await store.getTask(sweTaskId))!;
+    const archTrack = sweTask.tracks.find((t) => t.roleId === "software-architect")!;
+
+    // Attempting `board_post` on SWE WITHOUT `search_web` or `https://` URL MUST be blocked!
+    const ungroundedPost = await client.callTool({
+      arguments: {
+        markdown: "凭记忆拍脑袋选用某旧版队列方案，未做任何联网核实。",
+        stage: "board_post",
+        taskId: sweTaskId,
+        trackId: archTrack.trackId,
+        variables: { queue: "guessed-v1" },
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    expect(ungroundedPost.isError).toBe(true);
+    expect(firstText(ungroundedPost)).toContain("白板前置联网实证硬门禁拦截");
+    expect(firstText(ungroundedPost)).toContain("≤ 5 次查询上限");
+
+    // Attempting `deliverable` on SWE WITHOUT `search_web` or `https://` URL MUST ALSO be blocked by `evaluateRuleGate`!
+    const ungroundedDeliv = await client.callTool({
+      arguments: {
+        markdown: "# 架构方案\n### 呈批摘要卡\n- 未调用联网搜索也未附任何外部官方文档链接。",
+        stage: "deliverable",
+        taskId: sweTaskId,
+        trackId: archTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    expect(ungroundedDeliv.isError).toBe(true);
+    expect(firstText(ungroundedDeliv)).toContain("未执行联网实证检索");
+
+    // === 3. Honest 4-Tier Decision Readiness Downgrade (0 External URLs -> NEVER stamped `Verified`!) ===
+    const offlineWs = join(tempDir, "offline-downgrade-ws");
+    const startOffline = firstText(
+      await client.callTool({
+        arguments: {
+          allowOfflineAssumptions: true,
+          domain: "commercial",
+          effortProfile: "fast",
+          executionMode: "host-subscription",
+          goal: "离线纯推演：无外网链接时检验评级诚实降级",
+          lang: "zh",
+          lineupConfirmed: true,
+          roleIds: ["profit-modeler"],
+          topologyMode: "flat",
+          workspaceDir: offlineWs,
+        },
+        name: "vetoboard_start_council",
+      }),
+    );
+    const offlineTaskId = /watch\s+(vb_[a-z0-9_]+)/i.exec(startOffline)![1]!;
+    const offlineTask = (await store.getTask(offlineTaskId))!;
+    await client.callTool({
+      arguments: {
+        invokedTools: ["vetoboard_calc"],
+        markdown: "# 精算推演\n### 呈批摘要卡\n- 纯假设参数测算 BEP = 42 单/月（0 条外部 URL）。",
+        taskId: offlineTaskId,
+        trackId: offlineTask.tracks[0]!.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    await client.callTool({
+      arguments: {
+        invokedTools: ["vetoboard_calc"],
+        markdown: "# 督察复算\n### 呈批摘要卡\n- 公式代数自洽，但缺外部联网信源。",
+        taskId: offlineTaskId,
+        trackId: offlineTask.tracks[1]!.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    const offlineFiles = await readdir(offlineWs);
+    const offlineReportName = offlineFiles.find(
+      (f) => f.endsWith("-report.md") && !f.endsWith("-original-report.md"),
+    )!;
+    const offlineReport = await readFile(join(offlineWs, offlineReportName), "utf8");
+    expect(offlineReport).toContain("模型推算（Model-Derived");
+    expect(offlineReport).not.toContain("已验证（Verified");
   });
 });

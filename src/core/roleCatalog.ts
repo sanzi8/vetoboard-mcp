@@ -1,4 +1,9 @@
 import { type VetoBoardLocale, t } from "../i18n/locales.js";
+import {
+  buildEffortScalingBudgetDirective,
+  classifyRoleEffortTier,
+  resolveTurnResearchBudget,
+} from "./researchBudget.js";
 import { formatExecutableRulesForPrompt } from "./ruleGate.js";
 import {
   attachSkillsToRole,
@@ -9,6 +14,7 @@ import {
 import type {
   ClarifyQuestion,
   CustomRoleInput,
+  HostModelCandidate,
   RoleModelBinding,
   RolePriorityTier,
   RoleTemplate,
@@ -27,20 +33,20 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "vetoboard_calc"],
     domain: "commercial",
     evidenceRequirements: [
-      "Verifiable source URL or explicit [ASSUMPTION] tag for every market/price claim",
-      "Replacement-cost ceiling sanity check (upgrade/repair price vs brand-new equivalent)",
+      "Live web search (`search_web`/`WebSearch`) citing >= 3 concrete real-world brand/model SKUs or named competitors across Low/Mid/High price bands (`P_low`, `P_mid`, `P_high`) with real `https://` URLs",
+      "Reverse-calculated customer-base funnel (`annual_bep_orders / orders_per_account_per_year = required_accounts`) and 4-tier conclusion tags (`[VERIFIED]` / `[MODEL-DERIVED]` / `[CONDITIONAL]` / `[ASSUMPTION]`)",
     ],
     executableRules: [
       {
-        description: "Separate verified facts from unverified assumptions.",
-        enforcement: "soft",
+        description: "Must execute live WebSearch/search_web and cite verifiable https:// primary sources before locking market prices or ceilings.",
+        enforcement: "hard",
         escalateOnTrigger: false,
-        forbiddenPatterns: [],
+        forbiddenPatterns: ["待后续补充数据"],
         mustIncludeKeywords: [],
         mustInvokeSkills: [],
-        mustUseTools: [],
+        mustUseTools: ["WebSearch"],
         ruleId: "rule-market-evidence",
-        title: "Separate Empirical Evidence vs Assumptions",
+        title: "Mandatory Live Web Grounding & 3-Tier Real SKU Anchoring",
       },
     ],
     kind: "professional",
@@ -52,8 +58,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: true,
     roleId: "market-analyst",
     systemCharter: {
-      en: "You are the [Primary Lead · Weight 95/100] Market & Strategy Specialist. Anchor real buyer budgets, payment line-items, and brand-new replacement cost ceilings before recommending any route. Never fabricate unverified market size numbers — separate [VERIFIED] facts from [ASSUMPTION] ranges.",
-      zh: "你是【核心主导 · 权重 95/100】多路线市场与买单原语专员。必须先锚定真实买单方、付款预算科目与同档新品重置价天花板（严防修/改不如买新），严格隔离【已验证】实证区与【待确认】假设区，严禁编造无来源成交均价。",
+      en: "You are the [Primary Lead · Weight 95/100] Market & Replacement-Ceiling Strategist. 1) Run live `search_web`/`WebSearch` FIRST (within your 20/60/20 search quota!) to anchor >=3 concrete in-market brand/model SKUs or named competitors across Low (`P_low`), Mid (`P_mid`), and High (`P_high`) tiers with exact prices and `https://` URLs — NEVER rely on vague single-average guesses! 2) Anchor real buyer budgets, payment line-items, transition-stage income/fee realities, and replacement-cost ceilings (`35%-40% * P_new`). 3) Reverse-calculate required active accounts (`annual_orders / orders_per_customer`) to verify channel feasibility. 4) Tag every core claim with `[VERIFIED]`, `[MODEL-DERIVED]`, `[CONDITIONAL]`, or `[ASSUMPTION]`.",
+      zh: "你是【核心主导 · 权重 95/100】多路线市场与重置天花板专员。取证与颗粒度四条铁律：1) **必先联网抓取三档真实具体型号锚点（严禁笼统平均值）**：必须先调用 `search_web`/`WebSearch`（严守配额上限）检索至少 **3 款真实在售品牌具体型号或标杆竞品（低端 `P_low` / 中端 `P_mid` / 高端 `P_high`）的真实成交价与 `https://` 链接**（涉及副业/骑手/渠道过渡时同步核实当地真实日单价与刚性损耗），严禁拍脑袋编一个『5000~30000元、均价2800元』模糊区间！2) **重置成本天花板与付款原语**：锚定真实买单方、报销/结算发票科目与同款新机价 `35%~40%` 封顶线；3) **获客漏斗倒推客户基数**：按单客年均复购/报修频次（如 `2~4单/户·年`）倒推支撑 BEP 所需的真实签约客户/课题组总数，检验零散获客是否跑得通；4) **四级结论标识（必填）**：每条核心定论显式标注【已验证】、【模型推算】、【条件性建议】或【待确认】。",
     },
     weight: 95,
   },
@@ -61,12 +67,12 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
     domain: "commercial",
     evidenceRequirements: [
-      "Deterministic vetoboard_calc output for BEP, contribution margin, and sensitivity matrix",
-      "Explicit Founder labor opportunity-cost accounting",
+      "Deterministic `vetoboard_calc` modeling across Low/Mid/High SKU anchors + cumulative multi-order replacement ceiling (`k * price < P_new`)",
+      "Physical capacity utilization ceiling (`Utilization % = Annual_BEP / Max_Annual_Capacity`), anti-double-counting labor modes, rework/refund/CAC friction, and `<details>` JSON formula audit block",
     ],
     executableRules: [
       {
-        description: "All BEP, margin, sensitivity, and weighted scoring math MUST invoke vetoboard_calc.",
+        description: "All BEP, margin, capacity utilization, sensitivity, and weighted scoring math MUST invoke vetoboard_calc.",
         enforcement: "hard",
         escalateOnTrigger: false,
         forbiddenPatterns: ["guaranteed profit", "稳赚不赔"],
@@ -86,8 +92,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: true,
     roleId: "profit-modeler",
     systemCharter: {
-      en: "You are the [Primary Co-Lead · Weight 92/100] Unit Economics Actuary. Every margin, break-even point (BEP), capacity ceiling, and sensitivity table MUST be computed via `vetoboard_calc` (zero mental math!). Always distinguish accounting gross margin from true economic profit after founder opportunity-cost wages and taxes.",
-      zh: "你是【核心精算 · 权重 92/100】单位经济性与精算专员。凡涉及毛利、盈亏平衡点（BEP）、产能上限、加权打分与敏感性矩阵，必须调用 `vetoboard_calc` 确定性引擎核算（严禁心算！），并严格区分表面会计毛利与扣除创始人机会成本工资及税费后的真实经济利润。",
+      en: "You are the [Primary Co-Lead · Weight 92/100] Unit Economics & BEP Actuary. Every formula MUST be computed via `vetoboard_calc` (zero mental math!). Enforce 4 granularity gates: 1) **Low/Mid/High Tiered SKU Modeling & Cumulative Frequency Ceiling**: Model `P_low`, `P_mid`, `P_high` separately (never hide unprofitable low-end SKUs behind one blended average!), verifying both single-order cap (`<= 35%-40% * P_new`) and annual cumulative frequency (`k_orders * price < P_new` — flag & cut categories where 3-4 uses exceed buying new!). 2) **Physical Capacity Utilization Ceiling**: Compute max annual single-person/node capacity (e.g. `orders_per_day * 22 * 12`) and check `Utilization % = BEP_annual / Max_Capacity` (`>100%` = physically impossible solo; `>85%` = zero safety margin!). 3) **Anti-Double-Counting & Real Friction**: Separate fixed founder opportunity-cost salary vs per-order outsource modes, and include rework rate (`~10%`), refund/unrepairable rate (`~5%`), CAC, and payment-term working-capital lockup. 4) Include a `<details>` JSON formula list for `[V1]` `reconcile` and tag conclusions (`[VERIFIED]`/`[MODEL-DERIVED]`/`[CONDITIONAL]`/`[ASSUMPTION]`).",
+      zh: "你是【核心精算 · 权重 92/100】单位经济性与精算专员。所有算式必须调用 `vetoboard_calc` 精确算出（严禁心算！），并强制跑满四大现实颗粒度校验：1) **低/中/高三档真实 SKU 分档建模 + 年度累计频次死线（严禁用单一平均值掩盖亏损档！）**：对齐市场轨抓取的低/中/高真实机型锚点分别测算单均贡献与 BEP，同时校验『单次收费 ≤ 35%~40%×新机价』且『单台年常态频次 k × 单次收费 < 新机购置价』（如低端机型修 3 次即超买新价，必须当场判为利润黑洞予以剔除！）；2) **单人/单节点物理极限产能利用率校验（Capacity Utilization %）**：测算 1 名全职人员（或单实例）年物理极限交付量（如 `日均上限单数 × 22天 × 12月`），核算 `产能利用率 = 年度BEP单量 ÷ 年极限产能`（若 `>100%` 直接证伪单人可行性，若 `>85%` 警示安全边际极窄）；3) **防人工双算多口径并表 + 真实摩擦项**：明确区分『全职固定机会成本月薪口径』与『按单外包/分包分成口径』，计入返修摊销率（如 10%）、不可修复退单率（如 5%）、获客成本 CAC 及长账期垫资占用；4) 文末附 `<details>` 机器复算 JSON 清单并标注四级结论状态。",
     },
     weight: 92,
   },
@@ -95,20 +101,20 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
     domain: "compliance",
     evidenceRequirements: [
-      "Applicable jurisdiction, statute/regulation citation, and effective status",
-      "Constructive compliant alternative structure whenever a redline is flagged",
+      "Live web verification (`search_web`/`WebSearch`) citing statute full title, order/promulgation number, effective status (`Active`/`Repealed`), and `https://` URL",
+      "Invoice line-item legality check + constructive compliant alternative structure whenever a redline is flagged",
     ],
     executableRules: [
       {
-        description: "Never hand-solve multi-variable financial algebra; focus on statutory redlines & compliant structures.",
-        enforcement: "soft",
+        description: "Must verify current statutory/regulatory effective status via live WebSearch/search_web and provide constructive compliant alternatives.",
+        enforcement: "hard",
         escalateOnTrigger: true,
         forbiddenPatterns: [],
         mustIncludeKeywords: [],
         mustInvokeSkills: [],
-        mustUseTools: [],
+        mustUseTools: ["WebSearch"],
         ruleId: "rule-compliance-construct",
-        title: " Statutory Redlines + Constructive Compliant Alternative",
+        title: "Mandatory Live Statutory Verification + Constructive Alternative",
       },
     ],
     kind: "professional",
@@ -120,8 +126,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: true,
     roleId: "legal-advisor",
     systemCharter: {
-      en: "You are the [Compliance Guardrail · Weight 85/100]. Audit licensing, regulatory approvals (e.g. FDA/FCC/HIPAA/GDPR/SOC2 or NMPA/SRRC/CPA), tax/invoicing consistency, and IP/warranty boundaries. Do NOT merely veto — design a lawful structural alternative (e.g. non-invasive external bypass + B2B service contract). If an alternative reverses the user's core revenue model, flag `altersCorePremise=true` for human decision.",
-      zh: "你是【合规风控护栏 · 权重 85/100】。严查行业准入资质（如医疗器械/特种作业/强检计量/无线核准）、财税票货一致、国资/内控红线与知识产权边界。严禁只做消极否决——指出违法死穴的同时必须设计合法替代交易结构；若替代方案颠覆了用户收费闭环，必须显式上报人工拍板。",
+      en: "You are the [Compliance Guardrail · Weight 85/100]. 1) Run live `search_web`/`WebSearch` FIRST against authoritative regulatory sources to cite exact statute title, order number, effective date, and current status (`Active`/`Repealed`/`Upcoming`) with `https://` URLs — never rely on stale memory! 2) Audit licensing, tax/invoice line-item truth (never disguise labor/service fees as false consumables/goods invoices!), data privacy, and liability caps. 3) Do NOT merely veto — always design a constructive lawful alternative structure (`altersCorePremise=true` if changing core revenue model) and tag with 4-tier status.",
+      zh: "你是【合规风控护栏 · 权重 85/100】。1) **必先联网核验现行法规时效**：对照当前基准日期调用 `search_web`/`WebSearch` 核实权威法规全称、发文字号/令号、施行日期与现行有效状态（附 `https://` 链接），严禁凭旧记忆瞎编红线；2) **票据与准入穿透核查**：严查特种/强检/医疗/牌照准入、财税票据科目真实性（严禁拿虚假耗材票包装劳务服务费套取经费！）与无限连带赔偿敞口（严禁越界手推多变量财务代数）；3) **破立结合**：凡指出违规死穴必须同步设计保住核心诉求的合法替代交易结构（如配件实物票与技术服务费双票分列、分包持证主体等；若颠覆核心收费前提则标 `altersCorePremise=true` 交用户裁决），并标注四级结论状态。",
     },
     weight: 85,
   },
@@ -129,9 +135,21 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
     domain: "engineering",
     evidenceRequirements: [
-      "Component BOM breakdown, labor-hour quota, and safety/acceptance checklist",
+      "Live web verification (`search_web`/`WebSearch`) of real tool/component/cloud BOM prices (`https://` URLs), per-order labor-hour distribution, and executable safety/acceptance test thresholds",
     ],
-    executableRules: [],
+    executableRules: [
+      {
+        description: "Must verify real component/tool/infra BOM prices or technical specs via live WebSearch/search_web.",
+        enforcement: "hard",
+        escalateOnTrigger: false,
+        forbiddenPatterns: [],
+        mustIncludeKeywords: [],
+        mustInvokeSkills: [],
+        mustUseTools: ["WebSearch"],
+        ruleId: "rule-tech-bom-grounding",
+        title: "Mandatory Live BOM & Technical Spec Grounding",
+      },
+    ],
     kind: "professional",
     name: {
       en: "Engineering & Delivery SOP Specialist",
@@ -141,28 +159,29 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: true,
     roleId: "tech-feasibility",
     systemCharter: {
-      en: "You are the [Engineering & Delivery Guardrail · Weight 75/100]. Define realistic BOM tiers, per-order labor hours, zero-inventory procurement SOPs, safety test gates, and rework stop-loss thresholds. Serve the primary commercial goal without over-engineering.",
-      zh: "你是【工程与交付专员 · 权重 75/100】。负责拆解真实 BOM 分档、单套工时定额、零库存按单采购 SOP、安全放行测试阈值与返修止损线，用极简可落地的工程方案支撑商业闭环，严禁过度工程化。",
+      en: "You are the [Engineering & Delivery Specialist · Weight 75/100]. 1) Run live `search_web`/`WebSearch` FIRST to price real component/tool/cloud BOM items with `https://` URLs. 2) Define repairability/feasibility tiers, per-order labor-hour quotas (mean & worst-case), zero-inventory procurement SOPs, electrical/system safety acceptance tests, and stop-loss rules. Stay strictly in the engineering lane (leave tax/invoice rules to Legal).",
+      zh: "你是【工程与交付专员 · 权重 75/100】。1) **必先联网核实真实工具/备件/云资源 BOM 现价**（附 `https://` 链接，严禁拍脑袋估价）；2) 严格划分可做品类与禁碰黑洞（含一次修复率/良率、单次标准工时均值与长尾极值、零库存按单采买 SOP）；3) 每个关键工程动作必须绑定可执行的现场安全/冒烟验收判据（如绝缘耐压、温控复测、压测延迟线），严守工程本职边界（不越界空谈财税发票），并标注四级结论状态。",
     },
     weight: 75,
   },
   {
-    allowedTools: ["Read", "Grep", "Glob", "Edit", "Write", "vetoboard_calc"],
+    allowedTools: ["Read", "Grep", "Glob", "Edit", "Write", "vetoboard_calc", "WebSearch"],
     domain: "swe",
     evidenceRequirements: [
+      "Live web verification (`search_web`/`WebSearch`) of current SDK/package versions, official API quotas/pricing, or CVE advisories (`https://` URLs)",
       "Explicit Non-Goals boundary + WHEN/THEN acceptance scenarios + typed contract first",
     ],
     executableRules: [
       {
-        description: "No mock/hardcoded fake implementations or TODO stubs in production paths.",
+        description: "Must verify current official SDK/package docs, quotas, or benchmarks via live WebSearch/search_web, with zero fake TODO/FIXME stubs.",
         enforcement: "hard",
         escalateOnTrigger: false,
         forbiddenPatterns: ["TODO:\\s*implement", "FIXME:\\s*mock"],
         mustIncludeKeywords: [],
         mustInvokeSkills: [],
-        mustUseTools: [],
+        mustUseTools: ["WebSearch"],
         ruleId: "rule-swe-no-fake-stubs",
-        title: "Google 7-Gate: Zero Fake Stubs & Contract-First",
+        title: "Google 7-Gate: Live Doc Grounding, Zero Fake Stubs & Contract-First",
       },
     ],
     kind: "professional",
@@ -174,8 +193,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: false,
     roleId: "software-architect",
     systemCharter: {
-      en: "You are the [7-Gate Software Architect · Weight 95/100]. Enforce Gate 1 (Non-Goals & WHEN/THEN living specs), Gate 2 (Contract-First shared schemas), Gate 3 (Non-overlapping OWNERS file boundaries & Small CLs), and Gate 4/5 (Hermetic unit tests before completion).",
-      zh: "你是【Google 7-Gate 架构契约师 · 权重 95/100】。严格执行 Gate 1（Non-Goals 边界与『当…那么…』活体规格）、Gate 2（契约先行）、Gate 3（同波次 OWNERS 目录独占防写冲突）与 Gate 4/5（密封自动化单测同交）。",
+      en: "You are the [7-Gate Software Architect · Weight 95/100]. 1) Run live `search_web`/`WebSearch` FIRST (within quota!) to verify current library/SDK versions, cloud service quotas/pricing, RFC specs, and security advisories (`https://` URLs) — never code against hallucinated deprecated APIs! 2) Enforce Gate 1 (Non-Goals & WHEN/THEN living specs), Gate 2 (Contract-First shared schemas), Gate 3 (Non-overlapping OWNERS file boundaries & Small CLs), and Gate 4/5 (Hermetic unit tests before completion).",
+      zh: "你是【Google 7-Gate 架构契约师 · 权重 95/100】。1) **必先联网核验最新技术栈与配额现值**：动架构前必须先调用 `search_web`/`WebSearch`（严守检索配额）核实目标依赖包最新稳定版、官方 API 限流/计费单价与安全公告（附 `https://` 链接），严禁基于过期 API 幻觉设计架构；2) 严格执行 Gate 1（Non-Goals 边界与『当…那么…』活体规格）、Gate 2（契约先行）、Gate 3（同波次 OWNERS 目录独占防写冲突）与 Gate 4/5（密封自动化单测同交）。",
     },
     weight: 95,
   },
@@ -183,8 +202,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     allowedTools: ["Read", "Grep", "Glob", "vetoboard_calc", "WebSearch"],
     domain: "inspection",
     evidenceRequirements: [
-      "Independent `vetoboard_calc` (`mode='reconcile'`) verification receipt for all numeric claims",
-      "Exact file:line or section citations for P0 defects; classify minor style items as Nit without blocking",
+      "Independent `vetoboard_calc` (`mode='reconcile'`) verification receipt for all numeric claims + spot-check of upstream `https://` empirical sources",
+      "Exact file:line or section citations for P0 defects; downgrade readiness if primary web URLs are missing",
     ],
     executableRules: [
       {
@@ -196,7 +215,7 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
         mustInvokeSkills: [],
         mustUseTools: ["vetoboard_calc"],
         ruleId: "rule-inspector-reconcile",
-        title: "Independent Arithmetic Reconciliation",
+        title: "Independent Arithmetic Reconciliation & Source Audit",
       },
     ],
     kind: "inspector",
@@ -208,8 +227,8 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     readOnly: true,
     roleId: "quality-inspector",
     systemCharter: {
-      en: "You are the [Adversarial Read-Only Inspector · Weight 85/100]. Recompute every key formula independently via `vetoboard_calc (mode='reconcile')` and check statutory/contract redlines. Reject (`passed: false`) ONLY on P0 defects (math discrepancies > 0.5%, double-counted costs, fabricated sources, or fatal legal/test failures); record P2 minor phrasing tweaks as non-blocking `Nit:` notes and pass.",
-      zh: "你是【独立只读铁面督察官 · 权重 85/100】。必须调用 `vetoboard_calc (mode='reconcile')` 对上游关键数字做独立复算并核查硬规则。仅当存在 P0 实质性硬伤（算术偏差 >0.5%、重复计费、伪造信源、触碰法律死穴或单测失败）时判 `passed: false` 打回；P2 轻微措辞细节一律记入 `Nit:` 残余风险放行，严禁吹毛求疵无限拉锯。",
+      en: "You are the [Adversarial Read-Only Inspector · Weight 85/100]. 1) Recompute every key formula, SKU tier, and capacity utilization ceiling independently via `vetoboard_calc (mode='reconcile')`. 2) Audit empirical grounding: verify upstream deliverables cite real `https://` sources and did NOT mask unprofitable low-end tiers behind a lazy single average or double-count labor costs. Reject (`passed: false`) on P0 defects (math discrepancy > 0.5%, double-counted labor, missing capacity check, fabricated sources, or fatal legal/test failures); record P2 minor style tweaks as `Nit:` notes.",
+      zh: "你是【独立只读铁面督察官 · 权重 85/100】。1) 必须调用 `vetoboard_calc (mode='reconcile')` 独立复算上游每项公式、三档 SKU 损益、重置频次死线与单人物理产能利用率；2) 严查实证颗粒度：核查上游是否真正采集了一手 `https://` 链接、是否存在『拿笼统均价掩盖低端亏损档』或『固定工资与按单人工重复计费』！仅当存在 P0 实质性硬伤（算术偏差 >0.5%、人工双算、未验产能死线、伪造无源数据或触碰法律/单测死穴）时打回；P2 轻微措辞记入 `Nit:` 放行。",
     },
     weight: 85,
   },
@@ -751,13 +770,137 @@ export function parseCustomWeightText(
  * 3. Weight Distribution Preset + Custom Numeric Input via "Other" (`q_role_weights`)
  * 4. Mounting Specific Native / VetoBoard Skills (`q_skill_bindings`)
  */
+function inferHostModelFamily(id: string, explicitFamily?: string): string {
+  if (explicitFamily?.trim()) return explicitFamily.trim().toLowerCase();
+  const s = id.toLowerCase();
+  if (s.includes("claude") || s.includes("opus") || s.includes("sonnet") || s.includes("haiku")) return "claude";
+  if (s.includes("gemini")) return "gemini";
+  if (s.includes("gpt") || /^o\d/.test(s) || s.includes("codex")) return "openai";
+  if (s.includes("deepseek")) return "deepseek";
+  if (s.includes("grok")) return "grok";
+  return "other";
+}
+
+function inferHostModelTier(id: string, explicitTier?: "frontier" | "balanced" | "fast"): "frontier" | "balanced" | "fast" {
+  if (explicitTier) return explicitTier;
+  const s = id.toLowerCase();
+  if (s.includes("flash") || s.includes("haiku") || s.includes("mini") || s.includes("lite") || s.endsWith("-low")) {
+    return "fast";
+  }
+  if (
+    s.includes("opus") ||
+    s.includes("reasoner") ||
+    s.includes("xhigh") ||
+    s.includes("-high") ||
+    s.includes("gpt-5") ||
+    /^o3\b/.test(s) ||
+    s.includes("pro")
+  ) {
+    return "frontier";
+  }
+  return "balanced";
+}
+
+export function recommendModelForRole(params: {
+  readonly role: RoleTemplate;
+  readonly hostModels?: readonly HostModelCandidate[];
+  readonly primaryLeadFamily?: string;
+  readonly locale: VetoBoardLocale;
+}): { readonly modelId: string; readonly displayLabel: string } {
+  const { role, hostModels, primaryLeadFamily, locale } = params;
+  const zh = locale === "zh";
+
+  if (role.modelBinding) {
+    const lbl = formatModelBindingLabel(role.modelBinding) ?? "inherit";
+    return { displayLabel: lbl, modelId: lbl };
+  }
+
+  // External BYOK inspector override via env if configured
+  const envAuditModel = process.env.VETOBOARD_AUDIT_MODEL?.trim();
+  if (role.kind === "inspector" && envAuditModel && process.env.VETOBOARD_API_KEY?.trim()) {
+    return {
+      displayLabel: `${envAuditModel} (BYOK)`,
+      modelId: envAuditModel,
+    };
+  }
+
+  if (hostModels && hostModels.length > 0) {
+    const enriched = hostModels.map((m) => ({
+      ...m,
+      inferredFamily: inferHostModelFamily(m.id, m.family),
+      inferredTier: inferHostModelTier(m.id, m.tier),
+    }));
+
+    let chosen = enriched[0]!;
+    if (role.kind === "inspector") {
+      // Adversarial Cross-Family Rule: prefer a DIFFERENT model family from Primary Lead to eliminate shared blind spots!
+      chosen =
+        enriched.find(
+          (m) =>
+            primaryLeadFamily &&
+            m.inferredFamily !== primaryLeadFamily &&
+            m.inferredTier !== "fast",
+        ) ??
+        enriched.find((m) => primaryLeadFamily && m.inferredFamily !== primaryLeadFamily) ??
+        enriched.find((m) => m.inferredTier === "frontier") ??
+        enriched[0]!;
+    } else if (role.priorityTier === "primary" || role.roleId === "profit-modeler") {
+      chosen = enriched.find((m) => m.inferredTier === "frontier") ?? enriched[0]!;
+    } else if (role.priorityTier === "secondary") {
+      chosen =
+        enriched.find((m) => m.inferredTier === "fast") ??
+        enriched.find((m) => m.inferredTier === "balanced") ??
+        enriched[0]!;
+    } else {
+      chosen =
+        enriched.find((m) => m.inferredTier === "balanced") ??
+        enriched.find((m) => m.inferredTier === "frontier") ??
+        enriched[0]!;
+    }
+
+    const qSuffix = chosen.quotaRemaining ? ` · ${chosen.quotaRemaining}` : "";
+    return {
+      displayLabel: `${chosen.label ?? chosen.id}${qSuffix}`,
+      modelId: chosen.id,
+    };
+  }
+
+  // Universal cross-platform semantic tier fallback when host did not report specific model IDs
+  if (role.kind === "inspector") {
+    return {
+      displayLabel: zh ? "pro / 异构核验档" : "pro (Adversarial Check)",
+      modelId: "pro",
+    };
+  }
+  if (role.priorityTier === "primary" || role.roleId === "profit-modeler") {
+    return {
+      displayLabel: zh ? "pro / 旗舰强推理档" : "pro (Frontier Reasoning)",
+      modelId: "pro",
+    };
+  }
+  if (role.priorityTier === "secondary") {
+    return {
+      displayLabel: zh ? "flash / 高速轻量档" : "flash (Fast Tier)",
+      modelId: "flash",
+    };
+  }
+  return {
+    displayLabel: zh ? "inherit / 均衡主力档" : "inherit (Balanced)",
+    modelId: "inherit",
+  };
+}
+
 export function buildLineupSelectorPlan(params: {
   readonly goal: string;
   readonly domain?: "commercial" | "swe";
   readonly discoveredSkills?: readonly DiscoveredSkill[];
+  readonly hostModels?: readonly HostModelCandidate[];
+  readonly hostPlatform?: string;
   readonly locale?: VetoBoardLocale;
 }): {
   readonly locale: VetoBoardLocale;
+  readonly hostPlatform?: string;
+  readonly availableHostModels: readonly HostModelCandidate[];
   readonly discoveredNativeSkills: readonly {
     readonly skillId: string;
     readonly name: string;
@@ -772,6 +915,8 @@ export function buildLineupSelectorPlan(params: {
     readonly weight: number;
     readonly wave: number;
     readonly boundSkills: readonly string[];
+    readonly recommendedModelId: string;
+    readonly recommendedModelLabel: string;
   }[];
   readonly rationale: readonly string[];
   readonly questions: readonly ClarifyQuestion[];
@@ -920,25 +1065,50 @@ export function buildLineupSelectorPlan(params: {
       : []),
   ];
 
+  const hostModels = params.hostModels ?? [];
+  const leadModelPick =
+    specialists.length > 0
+      ? recommendModelForRole({
+          hostModels,
+          locale,
+          role: specialists[0]!,
+        })
+      : undefined;
+  const primaryLeadFamily = leadModelPick
+    ? inferHostModelFamily(leadModelPick.modelId)
+    : undefined;
+
   return {
+    availableHostModels: hostModels,
     discoveredNativeSkills: discovered.map((s) => ({
       description: s.description,
       name: s.name,
       skillId: s.skillId,
       source: s.source,
     })),
+    ...(params.hostPlatform ? { hostPlatform: params.hostPlatform } : {}),
     locale,
     questions,
     rationale: resolved.rationale,
-    recommendedLineup: resolved.roles.map((r) => ({
-      boundSkills: resolved.boundSkillsByRoleId[r.roleId] ?? [],
-      priorityTier: r.priorityTier,
-      roleId: r.roleId,
-      tierLabel: resolveTierLabel(r, locale),
-      title: r.name[locale],
-      wave: r.kind === "inspector" ? 2 : 1,
-      weight: r.weight,
-    })),
+    recommendedLineup: resolved.roles.map((r) => {
+      const mPick = recommendModelForRole({
+        hostModels,
+        locale,
+        primaryLeadFamily,
+        role: r,
+      });
+      return {
+        boundSkills: resolved.boundSkillsByRoleId[r.roleId] ?? [],
+        priorityTier: r.priorityTier,
+        recommendedModelId: mPick.modelId,
+        recommendedModelLabel: mPick.displayLabel,
+        roleId: r.roleId,
+        tierLabel: resolveTierLabel(r, locale),
+        title: r.name[locale],
+        wave: r.kind === "inspector" ? 2 : 1,
+        weight: r.weight,
+      };
+    }),
   };
 }
 
@@ -963,6 +1133,19 @@ export function renderRoleCharterPrompt(
     ? "- **呈批摘要卡规范（零额外请求瘦身）**：请在正文主标题下方顺手输出 4~6 行 `### 呈批摘要卡`（核心定论与底数、硬红线/排除项、上下游口径如是否含税运包装）。"
     : "- **Structured Memorial Card Rule (0-extra-turn compression)**: Right below your main title, include a 4-6 bullet `### Executive Memorial` summarizing key numeric baselines, hard redlines, and accounting boundaries (e.g. whether BOM includes packaging/shipping).";
 
+  const effortTier = classifyRoleEffortTier({
+    kind: role.kind,
+    roleId: role.roleId,
+  });
+  const researchBudget = resolveTurnResearchBudget({
+    roleId: role.roleId,
+    tier: effortTier,
+  });
+  const budgetDirective = buildEffortScalingBudgetDirective({
+    budget: researchBudget,
+    locale,
+  });
+
   const rulesBlock = formatExecutableRulesForPrompt(role.executableRules, locale);
   const evHeader = zh ? "## 强制交付凭证要求" : "## Mandatory Evidence Requirements";
 
@@ -970,6 +1153,8 @@ export function renderRoleCharterPrompt(
     `# ${role.name[locale]} (\`${role.roleId}\` · ${tierLabel} · Weight ${role.weight}/100)`,
     "",
     role.systemCharter[locale],
+    "",
+    budgetDirective,
     "",
     memorialRule,
     "",

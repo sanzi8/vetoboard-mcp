@@ -68,6 +68,11 @@ import {
 } from "../core/skillRadar.js";
 import { VetoBoardTaskStore } from "../core/taskStore.js";
 import {
+  extractVerifiedHttpUrls,
+  hasInvokedWebResearchTool,
+  resolveTurnResearchBudget,
+} from "../core/researchBudget.js";
+import {
   evaluateWhiteboardConvergence,
   extractWhiteboardVariables,
   formatWhiteboardLedgerForReport,
@@ -80,6 +85,7 @@ import {
   effortProfileSchema,
   executableRuleSchema,
   executionModeSchema,
+  hostModelCandidateSchema,
   roleModelBindingSchema,
   rolePriorityTierSchema,
   vetoboardLocaleInputSchema,
@@ -109,7 +115,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
   const server = new McpServer(
     {
       name: "vetoboard-mcp",
-      version: options?.version ?? "0.9.0",
+      version: options?.version ?? "1.0.0",
     },
     {
       capabilities: {
@@ -452,6 +458,16 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         domain: z.enum(["commercial", "swe"]).default("commercial"),
         extraSkillDirs: z.array(z.string()).optional(),
         goal: z.string().min(1),
+        hostModels: z
+          .array(hostModelCandidateSchema)
+          .optional()
+          .describe(
+            "Optional list of models available on the current host platform (e.g. from Antigravity `swarm(action='models')`, Claude Code `['opus','sonnet','haiku']`, Codex profiles, or T3 Code harnesses) so Pre-Flight displays a live model picker & cross-vendor inspector recommendation.",
+          ),
+        hostPlatform: z
+          .string()
+          .optional()
+          .describe("Optional host IDE identifier e.g. 'antigravity', 'claude-code', 'codex', 't3code', 'cursor'."),
         hostSkills: z
           .array(
             z.object({
@@ -464,7 +480,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         lang: vetoboardLocaleInputSchema,
         workspaceDir: z.string().optional(),
       }),
-      title: "VetoBoard Pre-Flight Role & Native Skill Bench",
+      title: "VetoBoard Pre-Flight Role, Model & Native Skill Bench",
     },
     async (args) => {
       const locale: VetoBoardLocale = resolveLocale(
@@ -484,10 +500,14 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         discoveredSkills: retrieved.skills,
         domain: args.domain,
         goal: args.goal,
+        hostModels: args.hostModels,
+        hostPlatform: args.hostPlatform,
         locale,
       });
       const briefingMarkdown = renderConversationalPreflightBriefing({
         goal: args.goal,
+        hostModels: args.hostModels,
+        hostPlatform: args.hostPlatform,
         locale,
         rationale: plan.rationale,
         recommendedLineup: plan.recommendedLineup,
@@ -521,6 +541,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       description:
         "Initialize a session-isolated multi-role council task. By default (`lineupConfirmed=false`), returns an interactive Role + Native-Skill Selection Bench so the user can choose Primary Leads, active roles, and native-skill specialists via `ask_question` before execution starts. Pass `lineupConfirmed=true` once confirmed.",
       inputSchema: z.object({
+        allowOfflineAssumptions: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Default false (ALL domains must verify live primary web sources first). Set true ONLY for air-gapped offline environments.",
+          ),
         autoTuneWeights: z
           .boolean()
           .default(true)
@@ -986,6 +1012,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       }
 
       const record: VetoBoardTaskRecord = {
+        allowOfflineAssumptions: args.allowOfflineAssumptions,
         calcChecksVerifiedCount: 0,
         candidateRoutes: clarify.candidateRoutes,
         ...(args.confirmedNotes ? { confirmedNotes: args.confirmedNotes } : {}),
@@ -1356,6 +1383,39 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
 
       // Stage W1: Dynamic Shared Whiteboard Concurrent Post (`stage === "board_post"`)
       if (args.stage === "board_post") {
+        // Universal Web-Grounding Gate: BEFORE locking assumptions onto the Shared Whiteboard,
+        // non-actuary roles across ALL domains (`commercial` & `swe`) MUST verify live primary facts via web search!
+        const prepBudget = resolveTurnResearchBudget({
+          effortProfile: task.effortProfile,
+          roleId: targetTrack.roleId,
+          tier: "board_prep",
+        });
+        const postCorpus = `${args.markdown}\n${Object.values(args.variables ?? {}).join("\n")}`;
+        const postUrls = extractVerifiedHttpUrls(postCorpus);
+        const postWebGrounded =
+          hasInvokedWebResearchTool(args.invokedTools) || postUrls.length >= 1;
+
+        if (
+          !task.allowOfflineAssumptions &&
+          prepBudget.minExternalWebSources >= 1 &&
+          !postWebGrounded
+        ) {
+          return textResult(
+            zh
+              ? [
+                  `⛔ **白板前置联网实证硬门禁拦截（Track: \`${targetTrack.trackId}\` · ${targetTrack.roleLabel}）**`,
+                  `- **拒绝原因**：任何课题（无论商业还是软件架构）上白板锁指标前，严禁零检索拍脑袋编数据！检测不到 \`search_web / WebSearch\` 调用记录，且提交内容中无任何真实外部 \`https://\` 来源链接。`,
+                  `- **整改与防死循环配额要求**：请立即在 **≤ ${prepBudget.maxExternalResearchCalls} 次查询上限（单域名 ≤ ${prepBudget.maxSameDomainFetches} 次；若连续 2 次检索无果立刻标 \`[ASSUMPTION]\` 止损收口！）** 内执行联网检索，锚定真实在售具体品牌型号现价 / 现行法规字号 / 最新官方文档，并在 \`markdown\` 或 \`variables\` 中附至少 1 条真实 \`https://\` URL（或将 \`"search_web"\` 传入 \`invokedTools\`）重新提交 \`stage: "board_post"\`！`,
+                ].join("\n")
+              : [
+                  `⛔ **Whiteboard Web-Grounding Hard Gate Blocked (\`${targetTrack.trackId}\`)**`,
+                  `- Every council topic MUST verify live primary facts BEFORE locking whiteboard variables! Neither \`WebSearch/search_web\` was invoked nor was any external \`https://\` URL cited.`,
+                  `- Run live web search within your quota (\`<= ${prepBudget.maxExternalResearchCalls}\` calls; stop after 2 empty queries as \`[ASSUMPTION]\`) and resubmit \`stage: "board_post"\` with \`>= 1\` real \`https://\` source URL.`,
+                ].join("\n"),
+            true,
+          );
+        }
+
         const activeSpecs = task.tracks.filter(
           (tItem) => tItem.roleId !== "quality-inspector" && tItem.status !== "skipped",
         );
@@ -1652,9 +1712,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       const safeMarkdown = preserveBaselineOnIncrementalPatch(args.markdown, prevDraft, locale);
       const savedPath = await store.writeTrackArtifact(task.taskId, targetTrack.trackId, safeMarkdown);
 
+      const gateTools = task.allowOfflineAssumptions
+        ? [...(args.invokedTools ?? []), "WebSearch"]
+        : args.invokedTools;
       const gate = evaluateRuleGate({
         invokedSkills: args.invokedSkills,
-        invokedTools: args.invokedTools,
+        invokedTools: gateTools,
         locale,
         outputText: safeMarkdown,
         rules: [...(roleTpl?.executableRules ?? []), ...(targetTrack.customRules ?? [])],

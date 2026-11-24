@@ -227,7 +227,18 @@ export const whiteboardReactionSchema = z.object({
 
 export type WhiteboardReaction = z.infer<typeof whiteboardReactionSchema>;
 
+export const hostModelCandidateSchema = z.object({
+  family: z.string().optional().describe("Model family/vendor e.g. 'claude', 'gemini', 'gpt', 'deepseek'."),
+  id: z.string().min(1).describe("Model identifier accepted by the host platform (e.g. 'claude-opus-4-6-thinking', 'opus', 'gpt-5', 'gemini-3.8-flash-high')."),
+  label: z.string().optional().describe("Human-readable display name."),
+  quotaRemaining: z.string().optional().describe("Optional remaining quota indicator, e.g. '100%' or '79%'."),
+  tier: z.enum(["frontier", "balanced", "fast"]).optional(),
+});
+
+export type HostModelCandidate = z.infer<typeof hostModelCandidateSchema>;
+
 export const vetoboardTaskRecordSchema = z.object({
+  allowOfflineAssumptions: z.boolean().default(false),
   calcChecksVerifiedCount: z.number().int().nonnegative().default(0),
   candidateRoutes: z.array(candidateRouteSchema).default([]),
   confirmedNotes: z.string().optional(),

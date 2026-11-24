@@ -1,4 +1,5 @@
 import { type VetoBoardLocale, t } from "../i18n/locales.js";
+import { extractVerifiedHttpUrls, hasInvokedWebResearchTool } from "./researchBudget.js";
 import type { ExecutableRule } from "./types.js";
 
 /**
@@ -82,6 +83,8 @@ export function evaluateRuleGate(input: {
   const toolSet = new Set((input.invokedTools ?? []).map((x) => x.toLowerCase()));
   const skillSet = new Set((input.invokedSkills ?? []).map((x) => x.toLowerCase()));
   const textLower = input.outputText.toLowerCase();
+  const verifiedUrls = extractVerifiedHttpUrls(input.outputText);
+  const webGrounded = hasInvokedWebResearchTool(input.invokedTools) || verifiedUrls.length >= 1;
 
   const hardViolations: RuleViolationItem[] = [];
   const softWarnings: RuleViolationItem[] = [];
@@ -90,7 +93,17 @@ export function evaluateRuleGate(input: {
     const reasons: string[] = [];
 
     for (const reqTool of rule.mustUseTools) {
-      if (!toolSet.has(reqTool.toLowerCase())) {
+      const reqLower = reqTool.toLowerCase();
+      const isWebReq = reqLower === "websearch" || reqLower === "search_web" || reqLower === "webfetch";
+      if (isWebReq) {
+        if (!webGrounded) {
+          reasons.push(
+            zh
+              ? `未执行联网实证检索（缺少 search_web/WebSearch 调用且正文中无任何真实外部 https:// 来源链接！请按 20/60/20 配额纪律先联网核实一手价格/法规/文档现值并附 URL）`
+              : `Missing live web grounding (neither WebSearch/search_web invoked nor any external https:// URL cited in output)`,
+          );
+        }
+      } else if (!toolSet.has(reqLower)) {
         reasons.push(
           zh
             ? `未真实调用必用工具 "${reqTool}"`
