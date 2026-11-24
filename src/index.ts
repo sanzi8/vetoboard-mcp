@@ -18,5 +18,6 @@ export * from "./core/citedBriefing.js";
 export * from "./core/progressRenderer.js";
 export * from "./core/taskStore.js";
 export * from "./core/computeRouter.js";
+export * from "./mcp/schemaCompat.js";
 export * from "./mcp/server.js";
 export * from "./mcp/httpServer.js";

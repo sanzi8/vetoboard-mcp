@@ -41,6 +41,15 @@ claude mcp add vetoboard -- npx -y vetoboard-mcp@latest --lang auto
 }
 ```
 
+### Hermes Agent + DeepSeek (`~/.hermes/config.yaml`) / OpenAI Codex (`~/.codex/config.toml`)
+```yaml
+# ~/.hermes/config.yaml
+mcp_servers:
+  vetoboard:
+    command: "npx"
+    args: ["-y", "vetoboard-mcp@latest", "--lang", "auto"]
+```
+
 ### 远程团队 HTTP 模式
 ```bash
 VETOBOARD_SERVER_TOKENS="sk-team-secret" npx vetoboard-mcp@latest serve --host 0.0.0.0 --port 4399 --lang auto

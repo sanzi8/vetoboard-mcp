@@ -26,6 +26,8 @@ export type NativeSkillSource =
   | "antigravity-builtin"
   | "claude-code"
   | "codex"
+  | "hermes"
+  | "cursor"
   | "vetoboard-pack"
   | "host-injected";
 
@@ -177,6 +179,7 @@ async function scanVetoBoardPacksDir(
 export interface DiscoverNativeSkillsOptions {
   readonly dataRootDir?: string;
   readonly workspaceDir?: string;
+  readonly homeDirOverride?: string;
   readonly extraSkillDirs?: readonly string[];
   readonly hostSkills?: readonly {
     readonly name: string;
@@ -191,7 +194,7 @@ export async function discoverNativeSkills(
   options?: DiscoverNativeSkillsOptions,
 ): Promise<DiscoveredSkill[]> {
   const locale = options?.locale ?? "en";
-  const home = homedir();
+  const home = options?.homeDirOverride ? resolve(options.homeDirOverride) : homedir();
   const dataRoot = resolve(options?.dataRootDir ?? process.env.VETOBOARD_DATA_DIR ?? join(home, ".vetoboard-mcp"));
   const discovered = new Map<string, DiscoveredSkill>();
 
@@ -211,13 +214,15 @@ export async function discoverNativeSkills(
   // 1b. Distilled reusable skills in VetoBoard's own library (`~/.vetoboard-mcp/library/skills/<id>/SKILL.md`)
   await scanFlatSkillSubdirs(join(dataRoot, "library", "skills"), "vetoboard-library", discovered);
 
-  // 2. Workspace-scoped skills (`.agents/skills`, `.agent/skills`, `.claude/skills`)
+  // 2. Workspace-scoped skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.hermes/skills`, `.cursor/skills`)
   const ws = options?.workspaceDir?.trim() || process.cwd();
   if (ws) {
     const resolvedWs = resolve(ws);
     await scanFlatSkillSubdirs(join(resolvedWs, ".agents", "skills"), "workspace", discovered);
     await scanFlatSkillSubdirs(join(resolvedWs, ".agent", "skills"), "workspace", discovered);
     await scanFlatSkillSubdirs(join(resolvedWs, ".claude", "skills"), "workspace", discovered);
+    await scanFlatSkillSubdirs(join(resolvedWs, ".hermes", "skills"), "workspace", discovered);
+    await scanFlatSkillSubdirs(join(resolvedWs, ".cursor", "skills"), "workspace", discovered);
   }
 
   // 3. Extra custom skill directories
@@ -225,11 +230,13 @@ export async function discoverNativeSkills(
     await scanFlatSkillSubdirs(resolve(extra), "workspace", discovered);
   }
 
-  // 4. User & Plugin skills across Antigravity, Claude Code, and Codex
+  // 4. User & Plugin skills across Antigravity, Claude Code, Codex, Hermes Agent & Cursor
   await scanFlatSkillSubdirs(join(home, ".gemini", "config", "skills"), "antigravity-user", discovered);
   await scanAntigravityPluginSkills(join(home, ".gemini", "config", "plugins"), discovered);
   await scanFlatSkillSubdirs(join(home, ".claude", "skills"), "claude-code", discovered);
   await scanFlatSkillSubdirs(join(home, ".codex", "skills"), "codex", discovered);
+  await scanFlatSkillSubdirs(join(home, ".hermes", "skills"), "hermes", discovered);
+  await scanFlatSkillSubdirs(join(home, ".cursor", "skills"), "cursor", discovered);
 
   // 5. VetoBoard built-in & user `.vetoboard-pack.json` governance skills
   const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -293,7 +300,10 @@ export function scoreSkillForGoal(skill: DiscoveredSkill, goal: string): number 
     (skill.source === "workspace" ||
       skill.source === "antigravity-plugin" ||
       skill.source === "antigravity-user" ||
-      skill.source === "claude-code")
+      skill.source === "claude-code" ||
+      skill.source === "codex" ||
+      skill.source === "hermes" ||
+      skill.source === "cursor")
   ) {
     score += 4;
   }

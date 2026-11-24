@@ -253,6 +253,8 @@ export async function retrieveReusableAssets(params: {
   }
   await scanMarkdownAgentsDir(join(home, ".gemini", "config", "agents"), "ide-agent", roleMap);
   await scanMarkdownAgentsDir(join(home, ".claude", "agents"), "ide-agent", roleMap);
+  await scanMarkdownAgentsDir(join(home, ".hermes", "agents"), "ide-agent", roleMap);
+  await scanMarkdownAgentsDir(join(home, ".codex", "agents"), "ide-agent", roleMap);
   await scanPackRoles(join(dataRoot, "packs"), roleMap);
 
   for (const builtin of BUILTIN_ROLE_TEMPLATES) {

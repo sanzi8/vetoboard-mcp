@@ -102,6 +102,7 @@ import {
   type VetoBoardTaskRecord,
 } from "../core/types.js";
 import { resolveLocale, type VetoBoardLocale, t } from "../i18n/locales.js";
+import { applyUniversalSchemaSanitizer } from "./schemaCompat.js";
 
 export interface CreateVetoBoardMcpServerOptions {
   readonly store?: VetoBoardTaskStore;
@@ -2289,6 +2290,9 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       return textResult(res.markdown, Boolean(res.isError));
     },
   );
+
+  // Strip Zod v4 Draft-2020-12 `propertyNames` / union `additionalProperties` so DeepSeek API, OpenAI Codex, Gemini & Hermes parse all 13 tools with zero HTTP 400 errors!
+  applyUniversalSchemaSanitizer(server);
 
   return server;
 }
