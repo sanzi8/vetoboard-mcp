@@ -504,6 +504,51 @@ function explainRoleScore(
         ? `Set to W${weight} Primary Lead to govern core architecture & delivery bottlenecks`
         : "Scopes lean MVP BOM, labor hours & anti-overengineering stop-loss gates";
   }
+  const roleReasonMap: Record<string, { zh: string; en: string }> = {
+    "backend-engineer": {
+      en: "Implements hermetic backend logic & automated tests strictly within backend OWNERS boundaries",
+      zh: "按共享类型契约在后端 OWNERS 目录内实现核心逻辑并实跑密封单测门禁",
+    },
+    "code-reviewer": {
+      en: "Read-only Google Critique audit separating Blocking defects from non-blocking Nit notes",
+      zh: "Google Critique 五维只读代码审查，抓假实现并严格区分 Blocking 缺陷与 Nit 建议",
+    },
+    "frontend-engineer": {
+      en: "Implements Google M3 UI with Normal/Loading/Empty/Error state completeness & zero dead buttons",
+      zh: "遵循 Google M3 准则实现正常/加载/空态/错误四态完备的真实交互界面",
+    },
+    "hr-roi-analyst": {
+      en: "Models full-loaded hiring cost, ramp-up cash trough, per-capita throughput ceiling & payback months",
+      zh: "精算全口径用工月成本、产能爬坡垫资坑深、人均创收天花板与招聘回本周期",
+    },
+    "operations-sop": {
+      en: "Decomposes reproducible field SOPs, time norms & desensitized internal/external manuals",
+      zh: "拆解新人可复现的分步标准作业程序（SOP）、质检签收单与内外双层脱敏手册",
+    },
+    "plg-growth-strategist": {
+      en: "Stress-tests open-source/free-tier cannibalization, CAC, monthly churn & zero-CAC viral loops",
+      zh: "审查免费/开源蚕食率、真实获客成本 CAC、月流失率 Churn 与零成本裂变飞轮",
+    },
+    "product-strategist": {
+      en: "Prioritizes MVP scope via deterministic RICE scoring & defines measurable activation metrics",
+      zh: "基于确定性 RICE 评分砍除伪需求，界定核心用户场景与最小可行 MVP 切线",
+    },
+    "risk-assessor": {
+      en: "Maps operational, invoice & supply-chain risks to observable triggers and circuit-breaker caps",
+      zh: "锚定法规票据、供应链与业务韧性风险的量化触发阈值与熔断止损预案",
+    },
+    "saas-billing-architect": {
+      en: "Designs idempotent TCC double-entry credit ledgers, 4-layer anti-abuse & minimal fixed cloud BOM",
+      zh: "设计 TCC 双式账本防双花、四层防薅羊毛硬熔断与极简生产级云基础设施 BOM",
+    },
+    "task-delegation-advisor": {
+      en: "Splits complex goals across direct execution, fast subagents & frontier tracks with clean OWNERS",
+      zh: "评估模块耦合度与算力梯度，划分直做与子代理并发委派边界及交接验收判据",
+    },
+  };
+  if (roleReasonMap[roleId]) {
+    return zh ? roleReasonMap[roleId]!.zh : roleReasonMap[roleId]!.en;
+  }
   if (roleId.startsWith("skill-")) {
     const skName = roleId.slice(6);
     return zh
@@ -592,6 +637,19 @@ export function renderConversationalPreflightBriefing(params: {
         ? "通用档位 `pro` (旗舰强推理) · `inherit` (均衡主力) · `flash` (高速轻量) · 或任意具体模型名（如 `opus`/`sonnet`/`haiku`、`gpt-5`/`o3`、或 BYOK `deepseek-reasoner`）"
         : "Universal tiers `pro` (Frontier) · `inherit` (Balanced) · `flash` (Fast) · or any concrete model ID (`opus`/`sonnet`/`haiku`, `gpt-5`/`o3`, or BYOK `deepseek-reasoner`)";
 
+  const activeRoleIdSet = new Set(recommendedLineup.map((r) => r.roleId));
+  const standbyRoles = retrieved.roles
+    .filter((r) => !activeRoleIdSet.has(r.role.roleId))
+    .slice(0, 8);
+  const standbyLine =
+    standbyRoles.length > 0
+      ? standbyRoles
+          .map((r) => `\`${r.role.name[locale]}\` (\`${r.role.roleId}\`·W${r.role.weight})`)
+          .join(" · ")
+      : zh
+        ? "全部已上场"
+        : "All mounted";
+
   const gapSkills = retrieved.unhatchedSkills.slice(0, 6);
   const gapLine =
     gapSkills.length > 0
@@ -622,6 +680,7 @@ export function renderConversationalPreflightBriefing(params: {
       ...rows,
       "",
       `- **🎯 当前平台可选模型池${hostPlatform ? ` (${hostPlatform})` : ""}**：${modelMenuLine}`,
+      `- **🏛️ 角色库备选专员席位（一句话即可加人或替换）**：${standbyLine}`,
       `- **✨ 可一键孵化为新角色的本机原生技能**（用后自动沉淀进复用库）：${gapLine}`,
       ...(kbLines.length > 0
         ? [
@@ -648,6 +707,7 @@ export function renderConversationalPreflightBriefing(params: {
     ...rows,
     "",
     `- **🎯 Available Models${hostPlatform ? ` (${hostPlatform})` : ""}**: ${modelMenuLine}`,
+    `- **🏛️ Standby Library Roles (Add or swap in 1 sentence)**: ${standbyLine}`,
     `- **✨ Native Skills Available to Hatch into Reusable Roles**: ${gapLine}`,
     ...(kbLines.length > 0
       ? [

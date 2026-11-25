@@ -233,7 +233,17 @@ export async function discoverNativeSkills(
     await scanFlatSkillSubdirs(resolve(extra), "workspace", discovered);
   }
 
-  // 4. User & Plugin skills across Antigravity, Claude Code, Codex, Hermes Agent, Cursor & OpenCode (T3 Code)
+  // 4. VetoBoard bundled pure-text governance skills (`<packageRoot>/skills/<id>/SKILL.md`) & `.vetoboard-pack.json` packs
+  // Scanned BEFORE host IDE dirs as `vetoboard-pack` so all 27 bundled skills work zero-config on every MCP client
+  // AND never trigger duplicate `skill-*` role auto-spawns when synced into host IDE skill folders!
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const bundledSkillsDir = resolve(moduleDir, "..", "..", "skills");
+  await scanFlatSkillSubdirs(bundledSkillsDir, "vetoboard-pack", discovered);
+  const builtinPacksDir = resolve(moduleDir, "..", "..", "packs");
+  await scanVetoBoardPacksDir(builtinPacksDir, locale, discovered);
+  await scanVetoBoardPacksDir(join(home, ".vetoboard-mcp", "packs"), locale, discovered);
+
+  // 5. User & Plugin skills across Antigravity, Claude Code, Codex, Hermes Agent, Cursor & OpenCode (T3 Code)
   await scanFlatSkillSubdirs(join(home, ".gemini", "config", "skills"), "antigravity-user", discovered);
   await scanAntigravityPluginSkills(join(home, ".gemini", "config", "plugins"), discovered);
   await scanFlatSkillSubdirs(join(home, ".claude", "skills"), "claude-code", discovered);
@@ -241,12 +251,6 @@ export async function discoverNativeSkills(
   await scanFlatSkillSubdirs(join(home, ".hermes", "skills"), "hermes", discovered);
   await scanFlatSkillSubdirs(join(home, ".cursor", "skills"), "cursor", discovered);
   await scanFlatSkillSubdirs(join(home, ".config", "opencode", "skills"), "opencode", discovered);
-
-  // 5. VetoBoard built-in & user `.vetoboard-pack.json` governance skills
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const builtinPacksDir = resolve(moduleDir, "..", "..", "packs");
-  await scanVetoBoardPacksDir(builtinPacksDir, locale, discovered);
-  await scanVetoBoardPacksDir(join(home, ".vetoboard-mcp", "packs"), locale, discovered);
 
   // 6. Antigravity built-in capability skills (filtered to real task-execution skills)
   if (options?.includeBuiltinIdeSkills !== false) {
@@ -414,6 +418,62 @@ export function attachSkillsToRole(
   };
 }
 
+const ROLE_DEFAULT_SKILL_IDS: Readonly<Record<string, readonly string[]>> = {
+  "backend-engineer": [
+    "karpathy-guidelines",
+    "systematic-debugging",
+    "verification-before-completion",
+    "investigate-first",
+    "surgical-patch",
+    "receiving-code-review",
+    "delivery-check",
+    "mcp-builder",
+  ],
+  "code-reviewer": [
+    "verification-before-completion",
+    "security-audit",
+    "requesting-code-review",
+    "verify-and-stop",
+    "delivery-check",
+    "caveman-review",
+  ],
+  "frontend-engineer": [
+    "karpathy-guidelines",
+    "verification-before-completion",
+    "frontend-design",
+    "agent-product-design",
+    "surgical-patch",
+    "receiving-code-review",
+    "delivery-check",
+    "chrome-extensions",
+  ],
+  "hr-roi-analyst": ["first-principles-unit-sanity", "discernment-nudge"],
+  "legal-advisor": ["contract-review", "discernment-nudge"],
+  "market-analyst": ["first-principles-unit-sanity", "content-research-writer", "discernment-nudge"],
+  "operations-sop": ["writing-plans", "delivery-check", "content-research-writer"],
+  "plg-growth-strategist": ["product-manager-toolkit", "content-research-writer", "grilling"],
+  "product-strategist": ["product-manager-toolkit", "brainstorming", "grill-with-docs"],
+  "profit-modeler": ["first-principles-unit-sanity", "discernment-nudge"],
+  "risk-assessor": ["security-audit", "discernment-nudge", "grilling"],
+  "saas-billing-architect": ["domain-modeling", "security-audit", "karpathy-guidelines"],
+  "software-architect": [
+    "7-gate-swe-verification",
+    "karpathy-guidelines",
+    "security-audit",
+    "product-manager-toolkit",
+    "domain-modeling",
+    "writing-plans",
+    "improve-codebase-architecture",
+  ],
+  "task-delegation-advisor": ["delegating-work", "writing-plans"],
+  "tech-feasibility": [
+    "karpathy-guidelines",
+    "investigate-first",
+    "systematic-debugging",
+    "security-audit",
+  ],
+};
+
 /**
  * Recommends default skill bindings for built-in roles + top candidate native skills that can spawn new specialist roles.
  */
@@ -435,14 +495,10 @@ export function recommendSkillBindingsAndCandidates(params: {
   for (const role of roles) {
     if (role.kind === "inspector") continue;
     const bound: string[] = [];
-    if (
-      (role.roleId === "market-analyst" || role.roleId === "profit-modeler") &&
-      byId.has("first-principles-unit-sanity")
-    ) {
-      bound.push("first-principles-unit-sanity");
-    }
-    if (role.roleId === "software-architect" && byId.has("7-gate-swe-verification")) {
-      bound.push("7-gate-swe-verification");
+    for (const defId of ROLE_DEFAULT_SKILL_IDS[role.roleId] ?? []) {
+      if (byId.has(defId) && !bound.includes(defId)) {
+        bound.push(defId);
+      }
     }
 
     // Also match non-pack native skills that align strongly with both goal and role

@@ -74,6 +74,7 @@ async function main(): Promise<void> {
 
     const res = await runHostInit({
       homeDirOverride: parseFlag(args, "--home-dir"),
+      includeBundledSkills: !args.includes("--no-pack-skills"),
       locale: resolveLocale(langFlag ?? "auto", "中文"),
       preferLocalBin: args.includes("--local-bin"),
       preferNpx: args.includes("--npx"),

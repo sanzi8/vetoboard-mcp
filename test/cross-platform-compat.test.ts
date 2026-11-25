@@ -566,6 +566,9 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
       "opencode",
       "t3code",
     ]);
+    for (const item of initResWin.installed) {
+      expect(item.bundledSkillsInstalledCount).toBe(27);
+    }
 
     // 1. Antigravity full 3-in-1 plugin bundle check
     const agyRule = await readFile(
@@ -670,5 +673,60 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     } finally {
       await new Promise<void>((r) => strictReasoningServer.close(() => r()));
     }
+  });
+
+  it("7. Full Scode 16-Role Arsenal & 27 Bundled Pure-Text Skills: zero-config discovery, smart goal promotion (PLG/SaaS/HR-ROI & Full-Stack 7-Gate SWE), and role-skill auto-mounting", async () => {
+    const emptyHome = join(tempDir, "empty-user-home");
+    await mkdir(emptyHome, { recursive: true });
+    const discovered = await discoverNativeSkills({
+      dataRootDir: tempDir,
+      homeDirOverride: emptyHome,
+      includeBuiltinIdeSkills: false,
+      workspaceDir: emptyHome,
+    });
+    // 27 bundled pure-text skills + 2 starter pack rules = 29 built-in skills out of the box!
+    expect(discovered.length).toBe(29);
+    expect(discovered.some((s) => s.skillId === "karpathy-guidelines")).toBe(true);
+    expect(discovered.some((s) => s.skillId === "contract-review")).toBe(true);
+    expect(discovered.some((s) => s.skillId === "product-manager-toolkit")).toBe(true);
+    expect(discovered.some((s) => s.skillId === "mcp-builder")).toBe(true);
+
+    // 7a. Commercial PLG + SaaS Billing goal automatically promotes `plg-growth-strategist` & `saas-billing-architect` and lists all 15 non-inspector reusable roles!
+    const plgPlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            goal: "评估开源 PLG 商业化上云、多租户 SaaS 计费账本与防刷号风控方案",
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    expect(plgPlan.reusableRolesCount).toBeGreaterThanOrEqual(15);
+    const activeIds = plgPlan.recommendedLineup.map((r: { roleId: string }) => r.roleId);
+    expect(activeIds).toContain("plg-growth-strategist");
+    expect(activeIds).toContain("saas-billing-architect");
+    expect(plgPlan.briefingMarkdown).toContain("🏛️ 角色库备选专员席位");
+
+    // 7b. Full-Stack SWE goal automatically activates Google 7-Gate 4-specialist bench (`software-architect` + `backend-engineer` + `frontend-engineer` + `code-reviewer`)!
+    const swePlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "swe",
+            goal: "全栈实现多租户前后端管理界面与实时组件交互",
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    const sweIds = swePlan.recommendedLineup.map((r: { roleId: string }) => r.roleId);
+    expect(sweIds).toContain("software-architect");
+    expect(sweIds).toContain("backend-engineer");
+    expect(sweIds).toContain("frontend-engineer");
+    expect(sweIds).toContain("code-reviewer");
   });
 });

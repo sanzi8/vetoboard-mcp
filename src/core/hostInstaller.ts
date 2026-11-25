@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,11 +34,14 @@ export interface RunHostInitOptions {
   readonly preferNpx?: boolean;
   readonly preferLocalBin?: boolean;
   readonly platformOverride?: NodeJS.Platform;
+  /** When true (default), also installs VetoBoard's 27 bundled governance skills into each host IDE! */
+  readonly includeBundledSkills?: boolean;
 }
 
 export interface InstalledHostSummary {
   readonly target: HostInstallTarget;
   readonly filesWritten: readonly string[];
+  readonly bundledSkillsInstalledCount?: number;
   readonly note: string;
 }
 
@@ -206,14 +209,54 @@ async function mergeOpenCodeMcpConfig(
   await writeFile(jsonFilePath, `${JSON.stringify(rootObj, null, 2)}\n`, "utf8");
 }
 
+async function copyTreeRecursive(srcDir: string, dstDir: string, overwrite: boolean): Promise<void> {
+  await mkdir(dstDir, { recursive: true });
+  const entries = await readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    const srcPath = join(srcDir, entry.name);
+    const dstPath = join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      await copyTreeRecursive(srcPath, dstPath, overwrite);
+    } else if (entry.isFile()) {
+      if (!overwrite && (await pathExists(dstPath))) continue;
+      await copyFile(srcPath, dstPath);
+    }
+  }
+}
+
+async function syncBundledGovernanceSkills(
+  bundledSkillsRoot: string,
+  targetSkillsRoot: string,
+  overwriteExisting: boolean,
+): Promise<number> {
+  if (!(await pathExists(bundledSkillsRoot))) return 0;
+  let syncedCount = 0;
+  const skillDirs = await readdir(bundledSkillsRoot, { withFileTypes: true });
+  for (const entry of skillDirs) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const srcSkillDir = join(bundledSkillsRoot, entry.name);
+    const dstSkillDir = join(targetSkillsRoot, entry.name);
+    if (!overwriteExisting && (await pathExists(join(dstSkillDir, "SKILL.md")))) {
+      syncedCount += 1;
+      continue;
+    }
+    await copyTreeRecursive(srcSkillDir, dstSkillDir, overwriteExisting);
+    syncedCount += 1;
+  }
+  return syncedCount;
+}
+
 export async function runHostInit(options: RunHostInitOptions): Promise<RunHostInitResult> {
   const zh = options.locale === "zh";
   const home = options.homeDirOverride ? resolve(options.homeDirOverride) : homedir();
   const ws = options.workspaceDir ? resolve(options.workspaceDir) : process.cwd();
   const effectivePlatform = options.platformOverride ?? process.platform;
+  const shouldSyncSkills = options.includeBundledSkills !== false;
 
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const installRoot = resolve(moduleDir, "..", "..");
+  const bundledSkillsRoot = join(installRoot, "skills");
   const cliEntryPath = join(installRoot, "dist", "cli.js").replace(/\\/g, "/");
   const isGitSourceClone = await pathExists(join(installRoot, ".git"));
 
@@ -312,18 +355,22 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       "utf8",
     );
     await writeFile(logoPath, VETOBOARD_LOGO_SVG, "utf8");
+    const agyBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(plugRoot, "skills"), true)
+      : 0;
 
     files.push(pluginJsonPath, mcpJsonPath, rulePath, skillShortPath, logoPath);
     installed.push({
+      bundledSkillsInstalledCount: agyBundledCount,
       filesWritten: files,
       note: zh
-        ? "已安装完整三位一体插件包（MCP + 常驻护栏 AGENTS.md + /vetoboard 技能）；在 Customizations 开启或点击 `MCP Servers > Refresh` 即可生效！"
-        : "Installed full 3-in-1 Antigravity plugin bundle (enable in Customizations or click `MCP Servers > Refresh`).",
+        ? `已安装完整三位一体插件包（MCP 16 大角色 + 常驻护栏 AGENTS.md + /vetoboard + ${agyBundledCount} 个治理技能包）；在 Customizations 开启或点击 \`MCP Servers > Refresh\` 即可生效！`
+        : `Installed full Antigravity plugin bundle (16 roles + AGENTS.md + /vetoboard + ${agyBundledCount} governance skills).`,
       target: "antigravity",
     });
   }
 
-  // 2. Claude Code (`~/.claude.json` + `~/.claude/skills/vetoboard/SKILL.md` + `~/.claude/commands/vetoboard.md`)
+  // 2. Claude Code (`~/.claude.json` + `~/.claude/skills/vetoboard/SKILL.md` + `~/.claude/commands/vetoboard.md` + 27 bundled skills)
   if (selectedTargets.has("claude")) {
     const claudeJsonPath = join(home, ".claude.json");
     const claudeSkillPath = join(home, ".claude", "skills", "vetoboard", "SKILL.md");
@@ -347,17 +394,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       ].join("\n"),
       "utf8",
     );
+    const claudeBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".claude", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: claudeBundledCount,
       filesWritten: [claudeJsonPath, claudeSkillPath, claudeCmdPath],
       note: zh
-        ? "已自动写入 MCP 配置、技能包与 `/vetoboard` 斜杠命令！"
-        : "Configured `.claude.json` MCP server, `vetoboard` skill, and `/vetoboard` slash command!",
+        ? `已自动写入 MCP 配置（含 16 大角色）、\`/vetoboard\` 斜杠命令与 ${claudeBundledCount} 个专业治理技能包！`
+        : `Configured \`.claude.json\` MCP server (16 roles), \`/vetoboard\` command, and ${claudeBundledCount} governance skills!`,
       target: "claude",
     });
   }
 
-  // 3. Cursor (`~/.cursor/mcp.json` + `~/.cursor/skills/vetoboard/SKILL.md`)
+  // 3. Cursor (`~/.cursor/mcp.json` + `~/.cursor/skills/vetoboard/SKILL.md` + bundled skills)
   if (selectedTargets.has("cursor")) {
     const cursorMcpPath = join(home, ".cursor", "mcp.json");
     const cursorSkillPath = join(home, ".cursor", "skills", "vetoboard", "SKILL.md");
@@ -365,17 +416,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     await mergeJsonMcpServerConfig(cursorMcpPath, "vetoboard", mcpEntry);
     await mkdir(dirname(cursorSkillPath), { recursive: true });
     await writeFile(cursorSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+    const cursorBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".cursor", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: cursorBundledCount,
       filesWritten: [cursorMcpPath, cursorSkillPath],
       note: zh
-        ? "已自动合并 `~/.cursor/mcp.json` 并挂载 `vetoboard` 技能包！"
-        : "Merged `~/.cursor/mcp.json` and installed `vetoboard` skill!",
+        ? `已自动合并 \`~/.cursor/mcp.json\` 并安装 \`vetoboard\` + ${cursorBundledCount} 个专业治理技能包！`
+        : `Merged \`~/.cursor/mcp.json\` and installed \`vetoboard\` + ${cursorBundledCount} governance skills!`,
       target: "cursor",
     });
   }
 
-  // 4. OpenAI Codex CLI (`~/.codex/config.toml` + `~/.codex/skills/vetoboard/SKILL.md`)
+  // 4. OpenAI Codex CLI (`~/.codex/config.toml` + `~/.codex/skills/vetoboard/SKILL.md` + bundled skills)
   if (selectedTargets.has("codex")) {
     const codexTomlPath = join(home, ".codex", "config.toml");
     const codexSkillPath = join(home, ".codex", "skills", "vetoboard", "SKILL.md");
@@ -393,17 +448,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       const block = `\n[mcp_servers.vetoboard]\ncommand = ${JSON.stringify(mcpEntry.command)}\nargs = [${argsToml}]\n`;
       await writeFile(codexTomlPath, `${existingToml.trimEnd()}\n${block}`, "utf8");
     }
+    const codexBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".codex", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: codexBundledCount,
       filesWritten: [codexTomlPath, codexSkillPath],
       note: zh
-        ? "已自动写入 `~/.codex/config.toml` 与 `vetoboard` 技能包！"
-        : "Configured `~/.codex/config.toml` and `vetoboard` skill!",
+        ? `已自动写入 \`~/.codex/config.toml\` 并同步 \`vetoboard\` + ${codexBundledCount} 个专业治理技能包！`
+        : `Configured \`~/.codex/config.toml\` and synced \`vetoboard\` + ${codexBundledCount} governance skills!`,
       target: "codex",
     });
   }
 
-  // 5. Hermes Agent + DeepSeek (`~/.hermes/config.yaml` + `~/.hermes/skills/vetoboard/SKILL.md`)
+  // 5. Hermes Agent + DeepSeek (`~/.hermes/config.yaml` + `~/.hermes/skills/vetoboard/SKILL.md` + bundled skills)
   if (selectedTargets.has("hermes")) {
     const hermesYamlPath = join(home, ".hermes", "config.yaml");
     const hermesSkillPath = join(home, ".hermes", "skills", "vetoboard", "SKILL.md");
@@ -427,17 +486,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
         await writeFile(hermesYamlPath, `${sep}mcp_servers:\n${entryBlock}`, "utf8");
       }
     }
+    const hermesBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".hermes", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: hermesBundledCount,
       filesWritten: [hermesYamlPath, hermesSkillPath],
       note: zh
-        ? "已自动写入 `~/.hermes/config.yaml` 与 `~/.hermes/skills/vetoboard/SKILL.md`！"
-        : "Configured `~/.hermes/config.yaml` and `~/.hermes/skills/vetoboard/SKILL.md`!",
+        ? `已自动写入 \`~/.hermes/config.yaml\` 并同步 \`vetoboard\` + ${hermesBundledCount} 个专业治理技能包！`
+        : `Configured \`~/.hermes/config.yaml\` and synced \`vetoboard\` + ${hermesBundledCount} governance skills!`,
       target: "hermes",
     });
   }
 
-  // 6. OpenCode & T3 Code Harness (`~/.config/opencode/opencode.json` + `~/.config/opencode/skills/vetoboard/SKILL.md`)
+  // 6. OpenCode & T3 Code Harness (`~/.config/opencode/opencode.json` + `~/.config/opencode/skills/vetoboard/SKILL.md` + bundled skills)
   if (selectedTargets.has("opencode")) {
     const opencodeJsonPath = join(home, ".config", "opencode", "opencode.json");
     const opencodeSkillPath = join(home, ".config", "opencode", "skills", "vetoboard", "SKILL.md");
@@ -448,12 +511,20 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     ]);
     await mkdir(dirname(opencodeSkillPath), { recursive: true });
     await writeFile(opencodeSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+    const opencodeBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(
+          bundledSkillsRoot,
+          join(home, ".config", "opencode", "skills"),
+          false,
+        )
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: opencodeBundledCount,
       filesWritten: [opencodeJsonPath, opencodeSkillPath],
       note: zh
-        ? "已自动写入 OpenCode / T3 Code 专属 `opencode.json`（`mcp` 数组格式）与 `vetoboard` 技能包！"
-        : "Configured OpenCode / T3 Code `opencode.json` (`mcp` array schema) and `vetoboard` skill!",
+        ? `已自动写入 OpenCode / T3 Code 专属 \`opencode.json\`（\`mcp\` 数组格式）与 ${opencodeBundledCount} 个治理技能包！`
+        : `Configured OpenCode / T3 Code \`opencode.json\` (\`mcp\` array schema) and ${opencodeBundledCount} governance skills!`,
       target: "opencode",
     });
   }
@@ -462,17 +533,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const t3SkillPath = join(home, ".t3code", "skills", "vetoboard", "SKILL.md");
     await mkdir(dirname(t3SkillPath), { recursive: true });
     await writeFile(t3SkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+    const t3BundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".t3code", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: t3BundledCount,
       filesWritten: [t3SkillPath],
       note: zh
-        ? "已就绪 T3 Code 多 Harness（Claude Code / Codex / Cursor / OpenCode）跨模型混编与技能包！"
-        : "Configured T3 Code multi-harness (Claude Code / Codex / Cursor / OpenCode) skill bundle!",
+        ? `已就绪 T3 Code 多 Harness（Claude Code / Codex / Cursor / OpenCode）跨模型混编与 ${t3BundledCount} 个治理技能包！`
+        : `Configured T3 Code multi-harness bundle and ${t3BundledCount} governance skills!`,
       target: "t3code",
     });
   }
 
-  // 7. Workspace-Local Bundle (`.mcp.json` + `.agents/skills/vetoboard/SKILL.md` + `.agents/rules/vetoboard.md`)
+  // 7. Workspace-Local Bundle (`.mcp.json` + `.agents/skills/vetoboard/SKILL.md` + `.agents/rules/vetoboard.md` + bundled skills)
   if (selectedTargets.has("workspace")) {
     const wsMcpPath = join(ws, ".mcp.json");
     const wsSkillPath = join(ws, ".agents", "skills", "vetoboard", "SKILL.md");
@@ -484,12 +559,16 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const skillMd = buildCrossPlatformSkillMarkdown("vetoboard");
     await writeFile(wsSkillPath, skillMd, "utf8");
     await writeFile(wsRulePath, skillMd, "utf8");
+    const wsBundledCount = shouldSyncSkills
+      ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(ws, ".agents", "skills"), false)
+      : 0;
 
     installed.push({
+      bundledSkillsInstalledCount: wsBundledCount,
       filesWritten: [wsMcpPath, wsSkillPath, wsRulePath],
       note: zh
-        ? `已在当前项目目录 \`${ws}\` 生成完整 \`.mcp.json\` + \`.agents/\` 规则与技能包！`
-        : `Installed workspace-scoped \`.mcp.json\` + \`.agents/\` skill & rule in \`${ws}\`!`,
+        ? `已在当前项目目录 \`${ws}\` 生成完整 \`.mcp.json\` + \`.agents/\` 规则与 ${wsBundledCount} 个治理技能包！`
+        : `Installed workspace-scoped \`.mcp.json\` + \`.agents/\` rule & ${wsBundledCount} governance skills in \`${ws}\`!`,
       target: "workspace",
     });
   }

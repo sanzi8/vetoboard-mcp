@@ -436,7 +436,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     expect(Buffer.concat(stdoutChunks).toString("utf8")).toBe("");
   });
 
-  it("starter governance pack is valid BOM-free JSON with all 6 bilingual role charters", async () => {
+  it("starter governance pack is valid BOM-free JSON with all 16 bilingual role charters", async () => {
     const packRaw = await readFile(
       fileURLToPath(new URL("../packs/starter-governance.vetoboard-pack.json", import.meta.url)),
       "utf8",
@@ -444,7 +444,7 @@ describe("vetoboard-mcp bilingual clean-room governance engine (stdio/in-memory 
     expect(packRaw.charCodeAt(0)).not.toBe(0xfeff);
     const pack = JSON.parse(packRaw);
     expect(pack.format).toBe("vetoboard-asset-pack");
-    expect(pack.roles).toHaveLength(6);
+    expect(pack.roles).toHaveLength(16);
     expect(pack.skills.length).toBeGreaterThanOrEqual(2);
   });
 
