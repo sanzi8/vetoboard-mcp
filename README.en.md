@@ -48,7 +48,7 @@ node ./dist/cli.js init --local-bin
 > [!IMPORTANT]
 > **Zero Extra API Cost by Default**: `vetoboard-mcp` defaults to `host-subscription` mode — reusing your existing IDE subscription with **\$0 extra third-party API cost**. Pre-flight model selection and role weight tuning happen right in normal chat prose with zero popups.
 
-![VetoBoard Pre-Flight & Governance Preview](./assets/vetoboard-preview.svg)
+![VetoBoard Live Antigravity 3-Pane Shared Whiteboard & Swarm Demo](./assets/vetoboard-antigravity-demo.svg)
 
 1. **Step 1 — Launch Pre-Flight Bench**: Type `/vetoboard <your business plan or software architecture goal>`. VetoBoard scans your reusable roles, skills, and historical Knowledge Cards, groups your host models & quotas, and prints a 6-column recommended lineup table.
 2. **Step 2 — Confirm or Customize in Plain Language**: Reply **`Go`** (or e.g. *`"Use opus for profit-modeler, flash for tech-feasibility, add hr-roi-analyst, Go"`*). Specialists run live web grounding (`board_post`), adjudicate conflicts via **ELECTRE + EU QMV** (`board_review`, `D >= 60%/65%`, `C >= 66.7%`, `R <= 2` early stop), write parallel deliverables, and pass a cross-family **`[V1]` Quality Inspector** (`vetoboard_calc` 0.5% tolerance audit).

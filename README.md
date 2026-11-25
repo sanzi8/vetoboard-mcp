@@ -107,7 +107,7 @@ mcp_servers:
 > [!IMPORTANT]
 > **核心前提（必看）**：`vetoboard-mcp` 默认采用 **`host-subscription`（宿主订阅直驱模式）**——100% 复用你当前 IDE 自身的模型额度，**无需配置任何第三方 API Key，额外算力费用为 \$0**！同时战前选模型、改权重、加角色全程在普通聊天流中用大白话完成，绝不弹窗遮挡表格。
 
-![VetoBoard 战前阵容选配与数学治理工作流示意](./assets/vetoboard-preview.svg)
+![VetoBoard 在 Antigravity 三分栏共享白板与 Swarm 实时协同动态演示](./assets/vetoboard-antigravity-demo.svg)
 
 ---
 
@@ -211,7 +211,7 @@ sequenceDiagram
 ```text
 vetoboard-mcp/
 ├── assets/
-│   └── vetoboard-preview.svg               # 战前阵容选配与白板裁决界面示意图
+│   └── vetoboard-antigravity-demo.svg      # Antigravity 三分栏白板与 Swarm 协同动态演示图
 ├── packs/
 │   └── starter-governance.vetoboard-pack.json # 16 大双语角色宪章与基础治理规则包
 ├── skills/                                 # 随包内置的 27 个纯文本商业与研发治理技能 (SKILL.md)

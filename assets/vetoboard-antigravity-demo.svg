@@ -1,0 +1,346 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 740" width="1280" height="740" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <style>
+      .mono { font-family: 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; }
+
+      /* Pulsing Live Dot */
+      @keyframes livePulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.3; transform: scale(0.82); }
+      }
+      .live-dot {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: livePulse 1.6s ease-in-out infinite;
+      }
+
+      /*
+       * Dual-Phase 16s Seamless Timeline:
+       * - Phase A (0% - 62% / 0s - 10s): Instant full visibility on load + live active spotlight wave across tracks!
+       * - Phase B (64% - 100% / 10.2s - 16s): Live streaming replay cascade (Prompt -> 6 Swarm Cards -> Final Verdict)!
+       */
+      @keyframes streamPrompt {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 66% { opacity: 0; transform: translateY(8px); }
+        70%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC1 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 70% { opacity: 0; transform: translateY(10px); }
+        74%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC2 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 74% { opacity: 0; transform: translateY(10px); }
+        78%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC3 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 78% { opacity: 0; transform: translateY(10px); }
+        82%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC4 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 82% { opacity: 0; transform: translateY(10px); }
+        86%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC5 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 86% { opacity: 0; transform: translateY(10px); }
+        90%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamC6 {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 90% { opacity: 0; transform: translateY(10px); }
+        94%, 100% { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes streamAnswer {
+        0%, 62% { opacity: 1; transform: translateY(0); }
+        64%, 93% { opacity: 0; transform: translateY(10px); }
+        98%, 100% { opacity: 1; transform: translateY(0); }
+      }
+
+      /* Traveling Active Highlight Glow during Phase A (0% - 60%) */
+      @keyframes glowStep1 { 0%, 8% { stroke: #38BDF8; stroke-width: 1.8; } 12%, 100% { stroke: #1E1E28; stroke-width: 1; } }
+      @keyframes glowStep2 { 0%, 8% { stroke: #1E1E28; } 10%, 18% { stroke: #F87171; stroke-width: 1.8; } 22%, 100% { stroke: #1E1E28; stroke-width: 1; } }
+      @keyframes glowStep3 { 0%, 18% { stroke: #1E1E28; } 20%, 28% { stroke: #38BDF8; stroke-width: 1.8; } 32%, 100% { stroke: #1E1E28; stroke-width: 1; } }
+      @keyframes glowStep4 { 0%, 28% { stroke: #1E1E28; } 30%, 38% { stroke: #C084FC; stroke-width: 1.8; } 42%, 100% { stroke: #1E1E28; stroke-width: 1; } }
+      @keyframes glowStep5 { 0%, 38% { stroke: #3F3216; } 40%, 48% { stroke: #FBBF24; stroke-width: 2; } 52%, 100% { stroke: #3F3216; stroke-width: 1; } }
+      @keyframes glowStep6 { 0%, 48% { stroke: #1F4737; } 50%, 60% { stroke: #34D399; stroke-width: 2.2; } 64%, 100% { stroke: #1F4737; stroke-width: 1.2; } }
+
+      /* Continuous Shimmer Scan Bar */
+      @keyframes scanBar {
+        0% { transform: translateX(0px); opacity: 0.85; }
+        50% { transform: translateX(432px); opacity: 1; }
+        100% { transform: translateX(0px); opacity: 0.85; }
+      }
+
+      .anim-prompt { animation: streamPrompt 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c1 { animation: streamC1 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c2 { animation: streamC2 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c3 { animation: streamC3 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c4 { animation: streamC4 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c5 { animation: streamC5 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-c6 { animation: streamC6 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+      .anim-answer { animation: streamAnswer 16s cubic-bezier(0.22, 1, 0.36, 1) infinite; }
+
+      .box-c1 { animation: glowStep1 16s ease-in-out infinite; }
+      .box-c2 { animation: glowStep2 16s ease-in-out infinite; }
+      .box-c3 { animation: glowStep3 16s ease-in-out infinite; }
+      .box-c4 { animation: glowStep4 16s ease-in-out infinite; }
+      .box-c5 { animation: glowStep5 16s ease-in-out infinite; }
+      .box-c6 { animation: glowStep6 16s ease-in-out infinite; }
+      .anim-bar { animation: scanBar 4.5s ease-in-out infinite; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .anim-prompt, .anim-c1, .anim-c2, .anim-c3, .anim-c4, .anim-c5, .anim-c6, .anim-answer, .live-dot, .anim-bar,
+        .box-c1, .box-c2, .box-c3, .box-c4, .box-c5, .box-c6 {
+          animation: none !important;
+          opacity: 1 !important;
+          transform: none !important;
+        }
+      }
+    </style>
+
+    <linearGradient id="scanGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#34D399" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0"/>
+    </linearGradient>
+
+    <clipPath id="clipSidebar"><rect x="0" y="32" width="214" height="708"/></clipPath>
+    <clipPath id="clipChat"><rect x="215" y="32" width="464" height="708"/></clipPath>
+    <clipPath id="clipSwarm"><rect x="680" y="32" width="600" height="708"/></clipPath>
+  </defs>
+
+  <!-- ==================== OUTER IDE WINDOW ==================== -->
+  <rect x="0" y="0" width="1280" height="740" rx="10" fill="#0B0B0E" stroke="#27272A" stroke-width="1.5"/>
+
+  <!-- Top Native Antigravity Menu Bar -->
+  <rect x="1" y="1" width="1278" height="31" rx="9" fill="#09090B"/>
+  <text x="16" y="21" fill="#A1A1AA" font-size="11.5" font-weight="600">Antigravity</text>
+  <text x="92" y="21" fill="#71717A" font-size="11.5">工作区</text>
+  <text x="140" y="21" fill="#71717A" font-size="11.5">视图</text>
+  <text x="178" y="21" fill="#71717A" font-size="11.5">窗口</text>
+  <!-- Window Controls -->
+  <line x1="1196" y1="16" x2="1206" y2="16" stroke="#71717A" stroke-width="1.2"/>
+  <rect x="1226" y="11" width="9" height="9" fill="none" stroke="#71717A" stroke-width="1.2"/>
+  <path d="M1255 11L1264 20M1264 11L1255 20" stroke="#71717A" stroke-width="1.2"/>
+  <line x1="0" y1="32" x2="1280" y2="32" stroke="#1E1E24" stroke-width="1"/>
+
+  <!-- ==================== PANE 1: LEFT SIDEBAR (100% Privacy-Scrubbed) ==================== -->
+  <g clip-path="url(#clipSidebar)">
+    <rect x="0" y="32" width="214" height="708" fill="#0C0C10"/>
+
+    <!-- Antigravity "A" Logo & Top Nav Icons -->
+    <path d="M18 57L24 43L30 57H27.2L24 49.2L20.8 57H18Z" fill="#F4F4F5"/>
+    <rect x="42" y="45" width="13" height="11" rx="2" fill="none" stroke="#71717A" stroke-width="1.2"/>
+    <line x1="46" y1="45" x2="46" y2="56" stroke="#71717A" stroke-width="1.2"/>
+    <text x="68" y="55" fill="#71717A" font-size="12">←   →   ⌕</text>
+
+    <!-- Primary Actions -->
+    <rect x="10" y="68" width="194" height="28" rx="6" fill="#18181F"/>
+    <text x="20" y="86" fill="#E4E4E7" font-size="12">+   新建对话</text>
+    <text x="20" y="114" fill="#A1A1AA" font-size="12">◷  自动化</text>
+    <text x="20" y="140" fill="#A1A1AA" font-size="12">❖  自定义</text>
+    <rect x="132" y="128" width="70" height="17" rx="8" fill="#14291E"/>
+    <text x="140" y="140" fill="#4ADE80" font-size="9.5" font-weight="600">vetoboard ●</text>
+
+    <!-- Scrubbed Public Demo Workspaces -->
+    <text x="14" y="172" fill="#52525B" font-size="10.5" font-weight="600">项目</text>
+
+    <text x="14" y="194" fill="#A1A1AA" font-size="11.5" font-weight="600">▤  saas-launchpad</text>
+    <rect x="8" y="204" width="198" height="26" rx="5" fill="#1F2028"/>
+    <text x="18" y="221" fill="#F4F4F5" font-size="11" font-weight="600">VetoBoard 云端定价证伪</text>
+    <text x="184" y="221" fill="#71717A" font-size="10">2m</text>
+
+    <text x="18" y="246" fill="#71717A" font-size="11">多租户计费账本风控审计</text>
+    <text x="184" y="246" fill="#52525B" font-size="10">1h</text>
+
+    <text x="18" y="270" fill="#71717A" font-size="11">出海 MoR 税务合规排雷</text>
+    <text x="184" y="270" fill="#52525B" font-size="10">3h</text>
+
+    <text x="14" y="304" fill="#A1A1AA" font-size="11.5" font-weight="600">▤  open-core-engine</text>
+    <text x="18" y="328" fill="#71717A" font-size="11">7-Gate 分布式锁架构评审</text>
+    <text x="184" y="328" fill="#52525B" font-size="10">1d</text>
+
+    <text x="18" y="352" fill="#71717A" font-size="11">跨厂商 Schema 兼容测试</text>
+    <text x="184" y="352" fill="#52525B" font-size="10">2d</text>
+
+    <text x="14" y="386" fill="#A1A1AA" font-size="11.5" font-weight="600">▤  hardware-iot</text>
+    <text x="18" y="410" fill="#71717A" font-size="11">智能硬件 BOM 与回本精算</text>
+    <text x="184" y="410" fill="#52525B" font-size="10">4d</text>
+
+    <text x="18" y="434" fill="#71717A" font-size="11">单人招聘人效 ROI 测算</text>
+    <text x="184" y="434" fill="#52525B" font-size="10">5d</text>
+
+    <!-- Sidebar Footer -->
+    <line x1="0" y1="702" x2="214" y2="702" stroke="#18181F" stroke-width="1"/>
+    <text x="16" y="724" fill="#71717A" font-size="11.5">⚙  设置</text>
+  </g>
+  <line x1="214" y1="32" x2="214" y2="740" stroke="#1E1E24" stroke-width="1"/>
+
+  <!-- ==================== PANE 2: CENTER ANTIGRAVITY CHAT ==================== -->
+  <g clip-path="url(#clipChat)">
+    <rect x="215" y="32" width="464" height="708" fill="#101014"/>
+
+    <!-- Chat Header -->
+    <text x="230" y="54" fill="#A1A1AA" font-size="12">saas-launchpad / <tspan fill="#F4F4F5" font-weight="600">VetoBoard 云端定价证伪</tspan></text>
+    <text x="642" y="54" fill="#71717A" font-size="13">▤  ⋮</text>
+    <line x1="215" y1="66" x2="679" y2="66" stroke="#1C1C22" stroke-width="1"/>
+
+    <!-- User Prompt Bubble -->
+    <g class="anim-prompt">
+      <rect x="272" y="78" width="392" height="46" rx="12" fill="#23242C"/>
+      <text x="286" y="98" fill="#F4F4F5" font-size="11.5">/vetoboard 拟推 AI SaaS：$12/月 Pro + $2.99 加油包 +</text>
+      <text x="286" y="115" fill="#F4F4F5" font-size="11.5">注册送 3 积分，全维度证伪国内或出海能否盈利？</text>
+    </g>
+
+    <!-- VetoBoard Final Verdict Response -->
+    <g class="anim-answer">
+      <text x="230" y="148" fill="#E4E4E7" font-size="11.8">经 5 席异构专员联网实证与 <tspan fill="#38BDF8" class="mono">vetoboard_calc</tspan> 0.5% 容差核账：</text>
+      <text x="230" y="167" fill="#F87171" font-size="11.8" font-weight="700">原拍板定价属「卖一单亏一单」负毛利陷阱，须执行六项重构放行。</text>
+
+      <text x="230" y="192" fill="#F4F4F5" font-size="11.5" font-weight="700">1. 低客单加油包被 MoR 固定费直接吃穿：</text>
+      <text x="238" y="210" fill="#A1A1AA" font-size="10.8">• 海外 $2.99 包经 Paddle ($0.50固定费+换汇退费损耗 <tspan fill="#FBBF24" font-weight="600">28.61%</tspan>)</text>
+      <text x="246" y="226" fill="#A1A1AA" font-size="10.8">实收仅 ¥14.24，扣算力成本 ¥15.38 后<tspan fill="#F87171" font-weight="600">未摊免费池即净亏 -¥1.14</tspan>。</text>
+
+      <text x="230" y="250" fill="#F4F4F5" font-size="11.5" font-weight="700">2. 免费送 3 积分 + 开源蚕食黑洞：</text>
+      <text x="238" y="268" fill="#A1A1AA" font-size="10.8">• 本地 CLI 截流 &gt;95% 极客；2%–5% 转化率下每名付费户须背负</text>
+      <text x="246" y="284" fill="#A1A1AA" font-size="10.8"><tspan fill="#F87171" font-weight="600">¥63–¥157.5</tspan> 免费池沉没死重，摊销后加油包巨亏 -¥59 起。</text>
+
+      <text x="230" y="308" fill="#F4F4F5" font-size="11.5" font-weight="700">3. 低频工具卖 $12 月订坠入高流失死螺旋：</text>
+      <text x="238" y="326" fill="#A1A1AA" font-size="10.8">• 受 $20/月高频全能竞品挤压，月 Churn 15%–25% 下毛利 LTV 仅</text>
+      <text x="246" y="342" fill="#A1A1AA" font-size="10.8">$30–$55，远低于非技术老板 CAC ($270+)，<tspan fill="#F87171" font-weight="600">经济 BEP = ∞</tspan>。</text>
+
+      <text x="230" y="366" fill="#F4F4F5" font-size="11.5" font-weight="700">4. 国内个人收费触发四重合规死穴：</text>
+      <text x="238" y="384" fill="#A1A1AA" font-size="10.8">• 同时触发 AI 算法备案、ICP 许可证(≥100万注资+3人社保)、等保与</text>
+      <text x="246" y="400" fill="#A1A1AA" font-size="10.8">B2B 专票阻塞；<tspan fill="#4ADE80" font-weight="600">海外独立站 + Paddle MoR</tspan> 为唯一合规冷启动通道。</text>
+
+      <!-- Refactored CONDITIONAL GO Box -->
+      <rect x="230" y="418" width="434" height="68" rx="8" fill="#13221B" stroke="#1E3A2F" stroke-width="1"/>
+      <text x="242" y="437" fill="#4ADE80" font-size="11.2" font-weight="700">🏁 终审裁决：CONDITIONAL GO（四席锁板重构活路）</text>
+      <text x="242" y="455" fill="#D1FAE5" font-size="10.5">免费池压至 1 枚 Flash 积分(日熔断≤¥30) + 砍掉&lt;$19包，改推 $19/25积分</text>
+      <text x="242" y="472" fill="#D1FAE5" font-size="10.5">决策包与 $69/月 Team → 保守 <tspan font-weight="700">40 Team + 130 包/月</tspan> 覆盖 ¥1.5万月薪盈利！</text>
+
+      <!-- Exported 3-File Bundle & Asset Distillation Pills -->
+      <rect x="230" y="498" width="434" height="56" rx="8" fill="#16171F" stroke="#262733" stroke-width="1"/>
+      <text x="242" y="517" fill="#94A3B8" font-size="10.5" font-weight="600">📂 已签发双层溯源角标三件套 &amp; 实战资产沉淀菜单：</text>
+      <text x="242" y="537" fill="#60A5FA" font-size="10.2" class="mono">[executive-briefing.md]  [full-report.md]  [🎁 存为技能 / 模板]</text>
+
+      <text x="230" y="576" fill="#52525B" font-size="11">❐   👍   👎   just now</text>
+    </g>
+
+    <!-- Bottom Antigravity Composer Input Card -->
+    <rect x="228" y="644" width="438" height="78" rx="12" fill="#18181F" stroke="#272732" stroke-width="1"/>
+    <text x="242" y="668" fill="#71717A" font-size="11.5">输入任何问题，输入 @ 提及，/ 触发操作</text>
+    <text x="242" y="706" fill="#A1A1AA" font-size="11">+   Gemini 4 Carbon (High) ⌄</text>
+    <text x="540" y="706" fill="#A1A1AA" font-size="11">⚡ 极速模式 ⌄</text>
+    <circle cx="644" cy="702" r="11" fill="#E4E4E7"/>
+    <text x="644" y="706" fill="#09090B" font-size="12" font-weight="700" text-anchor="middle">↑</text>
+  </g>
+  <line x1="679" y1="32" x2="679" y2="740" stroke="#1E1E24" stroke-width="1"/>
+
+  <!-- ==================== PANE 3: RIGHT ANTIGRAVITY SWARM LIVE BOARD ==================== -->
+  <g clip-path="url(#clipSwarm)">
+    <rect x="680" y="32" width="600" height="708" fill="#0D0D11"/>
+
+    <!-- Swarm Top Tab Bar -->
+    <rect x="692" y="39" width="76" height="22" rx="6" fill="#1C1C24"/>
+    <circle cx="705" cy="50" r="5" fill="#F59E0B"/>
+    <text x="715" y="54" fill="#F4F4F5" font-size="11" font-weight="600">Swarm</text>
+    <text x="780" y="54" fill="#71717A" font-size="13">+</text>
+    <line x1="680" y1="66" x2="1280" y2="66" stroke="#1C1C22" stroke-width="1"/>
+
+    <!-- Swarm Board Header & Pulsing Live Status -->
+    <text x="698" y="92" fill="#F4F4F5" font-size="13" font-weight="700">VetoBoard Council · SaaS Commercialization</text>
+    <circle cx="1226" cy="88" r="4" fill="#22C55E" class="live-dot"/>
+    <text x="1236" y="92" fill="#4ADE80" font-size="11" font-weight="600">Live</text>
+
+    <!-- Board / Members / Graph Tabs -->
+    <text x="698" y="116" fill="#F4F4F5" font-size="11.5" font-weight="600">Board <tspan fill="#71717A">18</tspan></text>
+    <line x1="698" y1="123" x2="748" y2="123" stroke="#F4F4F5" stroke-width="2"/>
+    <text x="766" y="116" fill="#71717A" font-size="11.5">Members <tspan fill="#52525B">6</tspan></text>
+    <text x="844" y="116" fill="#71717A" font-size="11.5">Graph</text>
+
+    <!-- Continuous Shimmer Scan Indicator -->
+    <rect x="694" y="124" width="140" height="2" rx="1" fill="url(#scanGrad)" class="anim-bar"/>
+
+    <!-- Search Box -->
+    <rect x="694" y="132" width="572" height="26" rx="6" fill="#14141B" stroke="#22222C" stroke-width="1"/>
+    <text x="706" y="149" fill="#52525B" font-size="11">⌕  Search whiteboard variables &amp; citations...</text>
+
+    <!-- Message #13: Market & PLG Strategist -->
+    <g class="anim-c1">
+      <rect x="694" y="168" width="572" height="80" rx="8" fill="#121218" stroke="#1E1E28" stroke-width="1" class="box-c1"/>
+      <rect x="704" y="178" width="20" height="20" rx="5" fill="#143326"/>
+      <text x="714" y="192" fill="#34D399" font-size="10.5" font-weight="700" text-anchor="middle">M</text>
+      <text x="732" y="192" fill="#F4F4F5" font-size="11.5" font-weight="700">@wb-plg-strategist</text>
+      <text x="862" y="192" fill="#71717A" font-size="10.5">→ @coordinator · Gemini 4 Neon</text>
+      <text x="1252" y="192" fill="#52525B" font-size="10" text-anchor="end" class="mono">#13 · 14:02</text>
+      <text x="732" y="212" fill="#A1A1AA" font-size="10.6"><tspan fill="#4ADE80" class="mono">[done]</tspan> Step W3 终稿已写入 <tspan fill="#60A5FA" class="mono">workspace/.vetoboard-tmp/track-1-plg.md</tspan></text>
+      <text x="732" y="230" fill="#D4D4D8" font-size="10.6">联网核验 Perplexity/Manus($20/月) 天花板与开源转云转化率(1%–2%)，证伪 $12 月订留存假设。</text>
+    </g>
+
+    <!-- Message #14: Legal & Compliance Guardrail -->
+    <g class="anim-c2">
+      <rect x="694" y="256" width="572" height="80" rx="8" fill="#121218" stroke="#1E1E28" stroke-width="1" class="box-c2"/>
+      <rect x="704" y="266" width="20" height="20" rx="5" fill="#172554"/>
+      <text x="714" y="280" fill="#60A5FA" font-size="10.5" font-weight="700" text-anchor="middle">L</text>
+      <text x="732" y="280" fill="#F4F4F5" font-size="11.5" font-weight="700">@wb-legal-advisor</text>
+      <text x="854" y="280" fill="#71717A" font-size="10.5">→ @coordinator · Gemini 4 Hydrogen</text>
+      <text x="1252" y="280" fill="#52525B" font-size="10" text-anchor="end" class="mono">#14 · 14:03</text>
+      <text x="732" y="300" fill="#A1A1AA" font-size="10.6"><tspan fill="#F87171" class="mono">[hard-veto]</tspan> 一票否决国内个人公有云收费入口 · 已写入 <tspan fill="#60A5FA" class="mono">track-2-legal.md</tspan></text>
+      <text x="732" y="318" fill="#D4D4D8" font-size="10.6">触发 AI 算法备案 + ICP(≥100万注资+3人社保) 四重死穴；锁定海外英文站 + Paddle MoR 通道。</text>
+    </g>
+
+    <!-- Message #15: Multi-Tenant SaaS Billing Architect -->
+    <g class="anim-c3">
+      <rect x="694" y="344" width="572" height="80" rx="8" fill="#121218" stroke="#1E1E28" stroke-width="1" class="box-c3"/>
+      <rect x="704" y="354" width="20" height="20" rx="5" fill="#16303D"/>
+      <text x="714" y="368" fill="#38BDF8" font-size="10.5" font-weight="700" text-anchor="middle">S</text>
+      <text x="732" y="368" fill="#F4F4F5" font-size="11.5" font-weight="700">@wb-saas-billing</text>
+      <text x="850" y="368" fill="#71717A" font-size="10.5">→ @coordinator · Gemini 4 Carbon</text>
+      <text x="1252" y="368" fill="#52525B" font-size="10" text-anchor="end" class="mono">#15 · 14:04</text>
+      <text x="732" y="388" fill="#A1A1AA" font-size="10.6"><tspan fill="#4ADE80" class="mono">[done]</tspan> TCC 双式账本与防刷架构已写入 <tspan fill="#60A5FA" class="mono">workspace/.vetoboard-tmp/track-3-billing.md</tspan></text>
+      <text x="732" y="406" fill="#D4D4D8" font-size="10.6">Postgres 幂等预扣防并发双花 + Turnstile/OAuth/Redis ≤¥30/天熔断；生产固定月 BOM 锁死 $33。</text>
+    </g>
+
+    <!-- Message #16: Unit Economics & Profit Actuary -->
+    <g class="anim-c4">
+      <rect x="694" y="432" width="572" height="84" rx="8" fill="#121218" stroke="#1E1E28" stroke-width="1" class="box-c4"/>
+      <rect x="704" y="442" width="20" height="20" rx="5" fill="#2E1065"/>
+      <text x="714" y="456" fill="#C084FC" font-size="10.5" font-weight="700" text-anchor="middle">P</text>
+      <text x="732" y="456" fill="#F4F4F5" font-size="11.5" font-weight="700">@wb-profit-modeler</text>
+      <text x="862" y="456" fill="#71717A" font-size="10.5">→ @coordinator · 主裁权重 98</text>
+      <text x="1252" y="456" fill="#52525B" font-size="10" text-anchor="end" class="mono">#16 · 14:05</text>
+      <text x="732" y="476" fill="#A1A1AA" font-size="10.6"><tspan fill="#4ADE80" class="mono">[done]</tspan> 对齐全席锁板口径精算完毕 · 已写入 <tspan fill="#60A5FA" class="mono">track-4-profit-modeler.md</tspan></text>
+      <text x="732" y="494" fill="#D4D4D8" font-size="10.6">砍死 $2.99 必亏包，改推 $19/25积分包(净毛利+¥73.68) 与 $69/月 Team(+¥214.81)，附复算公式 JSON。</text>
+    </g>
+
+    <!-- Message #17: Coordinator ELECTRE/QMV Lock -->
+    <g class="anim-c5">
+      <rect x="694" y="524" width="572" height="82" rx="8" fill="#1A1610" stroke="#3F3216" stroke-width="1" class="box-c5"/>
+      <rect x="704" y="534" width="20" height="20" rx="5" fill="#451A03"/>
+      <text x="714" y="548" fill="#FBBF24" font-size="10.5" font-weight="700" text-anchor="middle">C</text>
+      <text x="732" y="548" fill="#FBBF24" font-size="11.5" font-weight="700">@coordinator</text>
+      <text x="826" y="548" fill="#A1A1AA" font-size="10.5">→ @wb-quality-inspector · ELECTRE/QMV 数学支配门禁</text>
+      <text x="1252" y="548" fill="#78716C" font-size="10" text-anchor="end" class="mono">#17 · 14:06</text>
+      <text x="732" y="568" fill="#FDE68A" font-size="10.6">⚖️ 共享白板数学裁决锁板通过：D = 100% (≥65%) · C = 100% (≥66.7%) · 四轨六要素 0 分歧闭合！</text>
+      <text x="732" y="586" fill="#D6D3D1" font-size="10.6">正在唤醒跨家族只读督察官（Claude Opus 4.6 Thinking）执行 vetoboard_calc 0.5% 容差独立核账。</text>
+    </g>
+
+    <!-- Message #18: Cross-Family Quality Inspector Final Sign-off -->
+    <g class="anim-c6">
+      <rect x="694" y="614" width="572" height="104" rx="8" fill="#111C18" stroke="#1F4737" stroke-width="1.2" class="box-c6"/>
+      <rect x="704" y="624" width="20" height="20" rx="5" fill="#064E3B"/>
+      <text x="714" y="638" fill="#34D399" font-size="10.5" font-weight="700" text-anchor="middle">Q</text>
+      <text x="732" y="638" fill="#34D399" font-size="11.5" font-weight="700">@wb-quality-inspector</text>
+      <text x="884" y="638" fill="#A7F3D0" font-size="10.5">→ @coordinator · Claude Opus 4.6 (跨家族独立督察)</text>
+      <text x="1252" y="638" fill="#6EE7B7" font-size="10" text-anchor="end" class="mono">#18 · 14:08</text>
+      <text x="732" y="658" fill="#ECFDF5" font-size="10.6"><tspan fill="#4ADE80" font-weight="700" class="mono">[inspector-done]</tspan> vetoboard_calc(mode='reconcile') 独立复算 8/8 项全通过（误差 0.017% &lt; 0.5%）！</text>
+      <text x="732" y="676" fill="#D1FAE5" font-size="10.6">全角标《统帅终审简报》（含 24 处 [[S1·§1]]..[[V1]] 可点击溯源锚点）已落盘：</text>
+      <text x="732" y="696" fill="#60A5FA" font-size="10.6" class="mono">workspace/.vetoboard-tmp/vb_saas_audit/executive-briefing.md</text>
+    </g>
+  </g>
+</svg>
