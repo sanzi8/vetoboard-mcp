@@ -31,7 +31,7 @@ const execFileAsync = promisify(execFile);
  *    supporting instant withdrawal via `action: "withdraw"`!
  */
 
-export const DEFAULT_VETOBOARD_HUB_REPO = "vetoboard-mcp/community-assets";
+export const DEFAULT_VETOBOARD_HUB_REPO = "sanzi8/vetoboard-mcp";
 
 export interface SanitizeResult {
   readonly sanitized: string;
