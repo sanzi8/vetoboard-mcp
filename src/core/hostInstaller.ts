@@ -1,6 +1,6 @@
-import { access, copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { VetoBoardLocale } from "../i18n/locales.js";
 import { CURRENT_VETOBOARD_VERSION } from "./selfUpdater.js";
@@ -38,9 +38,17 @@ export interface RunHostInitOptions {
   readonly includeBundledSkills?: boolean;
 }
 
+export interface SkippedCorruptConfigNotice {
+  readonly target: HostInstallTarget;
+  readonly filePath: string;
+  readonly reason: string;
+}
+
 export interface InstalledHostSummary {
   readonly target: HostInstallTarget;
   readonly filesWritten: readonly string[];
+  readonly backupsCreated?: readonly string[];
+  readonly skippedCorruptFiles?: readonly SkippedCorruptConfigNotice[];
   readonly bundledSkillsInstalledCount?: number;
   readonly note: string;
 }
@@ -48,6 +56,8 @@ export interface InstalledHostSummary {
 export interface RunHostInitResult {
   readonly commandMode: "npx" | "local-node";
   readonly installed: readonly InstalledHostSummary[];
+  readonly backupsCreated?: readonly string[];
+  readonly skippedCorruptFiles?: readonly SkippedCorruptConfigNotice[];
   readonly markdown: string;
 }
 
@@ -138,75 +148,329 @@ function buildCrossPlatformSkillMarkdown(serverLabel: string): string {
   ].join("\n");
 }
 
-async function mergeJsonMcpServerConfig(
-  jsonFilePath: string,
-  serverKey: string,
-  mcpEntry: { readonly command: string; readonly args: readonly string[] },
-): Promise<void> {
-  let rootObj: Record<string, unknown> = {};
+type StrictReadResult =
+  | { readonly kind: "missing" }
+  | { readonly kind: "present"; readonly raw: string }
+  | { readonly kind: "io-error"; readonly reason: string };
+
+async function readTextFileStrict(filePath: string): Promise<StrictReadResult> {
   try {
-    const raw = await readFile(jsonFilePath, "utf8");
-    const parsed = JSON.parse(raw.replace(/^\uFEFF/, ""));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      rootObj = parsed as Record<string, unknown>;
+    const raw = await readFile(filePath, "utf8");
+    return { kind: "present", raw };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") {
+      return { kind: "missing" };
     }
-  } catch {
-    // File absent or empty -> initialize fresh object
+    return {
+      kind: "io-error",
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Safely strips JSONC `//` line comments, `/* ... * /` block comments, and trailing commas `,`
+ * BEFORE `}` or `]` WITHOUT touching URLs (`https://...`) or comment tokens inside string literals.
+ */
+export function stripJsoncCommentsAndTrailingCommas(input: string): string {
+  const withoutComments: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    const next = input[i + 1];
+
+    if (inString) {
+      withoutComments.push(ch);
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      withoutComments.push(ch);
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < input.length && input[i] !== "\n") {
+        i++;
+      }
+      if (i < input.length && input[i] === "\n") {
+        withoutComments.push("\n");
+      }
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      i += 2;
+      let closed = false;
+      while (i < input.length) {
+        if (input[i] === "*" && input[i + 1] === "/") {
+          i += 1;
+          closed = true;
+          break;
+        }
+        if (input[i] === "\n") {
+          withoutComments.push("\n");
+        }
+        i++;
+      }
+      if (!closed) {
+        // Force JSON.parse to reject unclosed block comments as corrupt!
+        withoutComments.push("/*UNCLOSED_BLOCK_COMMENT");
+      }
+      continue;
+    }
+
+    withoutComments.push(ch);
   }
 
-  const existingServers =
-    rootObj.mcpServers && typeof rootObj.mcpServers === "object" && !Array.isArray(rootObj.mcpServers)
-      ? (rootObj.mcpServers as Record<string, unknown>)
-      : {};
+  const joined = withoutComments.join("");
+  const out: string[] = [];
+  inString = false;
+  escaped = false;
 
+  for (let i = 0; i < joined.length; i++) {
+    const ch = joined[i]!;
+    if (inString) {
+      out.push(ch);
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      out.push(ch);
+      continue;
+    }
+
+    if (ch === ",") {
+      let k = i + 1;
+      while (k < joined.length && /\s/.test(joined[k]!)) {
+        k++;
+      }
+      if (k < joined.length && (joined[k] === "}" || joined[k] === "]")) {
+        continue;
+      }
+    }
+
+    out.push(ch);
+  }
+
+  return out.join("");
+}
+
+function parseJsonOrJsoncObject(
+  raw: string,
+): { readonly ok: true; readonly value: Record<string, unknown> } | { readonly ok: false; readonly reason: string } {
+  if (raw.includes("\u0000")) {
+    return { ok: false, reason: "Contains binary NUL bytes" };
+  }
+  const cleanBom = raw.replace(/^\uFEFF/, "");
+  if (cleanBom.trim().length === 0) {
+    return { ok: true, value: {} };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleanBom);
+  } catch {
+    try {
+      parsed = JSON.parse(stripJsoncCommentsAndTrailingCommas(cleanBom));
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : "Invalid JSON/JSONC syntax",
+      };
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      reason: "Top-level JSON value must be an object (refusing to overwrite array/primitive)",
+    };
+  }
+
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+type ConfigWriteOutcome =
+  | { readonly status: "written"; readonly backupPath?: string }
+  | { readonly status: "unchanged" }
+  | { readonly status: "skipped-corrupt"; readonly reason: string };
+
+async function backupAndWriteAtomic(params: {
+  readonly filePath: string;
+  readonly nextContent: string;
+  readonly existingRaw: string | undefined;
+  readonly backupDir?: string;
+  readonly target: HostInstallTarget;
+}): Promise<{ readonly status: "written"; readonly backupPath?: string } | { readonly status: "unchanged" }> {
+  if (params.existingRaw !== undefined && params.existingRaw === params.nextContent) {
+    return { status: "unchanged" };
+  }
+
+  await mkdir(dirname(params.filePath), { recursive: true });
+
+  let backupPath: string | undefined;
+  if (params.backupDir && params.existingRaw !== undefined && params.existingRaw.length > 0) {
+    await mkdir(params.backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const nonce = Math.random().toString(36).slice(2, 6);
+    const safeBase = basename(params.filePath).replace(/[^A-Za-z0-9._-]/g, "_");
+    backupPath = join(params.backupDir, `${params.target}--${safeBase}.${stamp}-${nonce}.bak`);
+    await writeFile(backupPath, params.existingRaw, "utf8");
+  }
+
+  const tmpPath = `${params.filePath}.vetoboard-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.tmp`;
+  try {
+    await writeFile(tmpPath, params.nextContent, "utf8");
+    await rename(tmpPath, params.filePath);
+  } catch (err) {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+    throw err;
+  }
+
+  return { backupPath, status: "written" };
+}
+
+function validateTomlSafeToAppend(raw: string): string | undefined {
+  if (raw.includes("\u0000")) {
+    return "Contains binary NUL bytes";
+  }
+  if ((raw.match(/"""/g) ?? []).length % 2 !== 0) {
+    return "Unclosed multiline string (\"\"\") in config.toml";
+  }
+  if ((raw.match(/'''/g) ?? []).length % 2 !== 0) {
+    return "Unclosed literal multiline string (''') in config.toml";
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (trimmed.startsWith("[") && !/^\[\[?[A-Za-z0-9_."'-]+(?:\s*\.\s*[A-Za-z0-9_."'-]+)*\]\]?\s*(?:#.*)?$/.test(trimmed)) {
+      return `Malformed TOML table header: ${trimmed.slice(0, 60)}`;
+    }
+  }
+  return undefined;
+}
+
+async function mergeJsonMcpServerConfig(params: {
+  readonly jsonFilePath: string;
+  readonly serverKey: string;
+  readonly mcpEntry: { readonly command: string; readonly args: readonly string[] };
+  readonly backupDir?: string;
+  readonly target: HostInstallTarget;
+}): Promise<ConfigWriteOutcome> {
+  const existing = await readTextFileStrict(params.jsonFilePath);
+  if (existing.kind === "io-error") {
+    return { reason: existing.reason, status: "skipped-corrupt" };
+  }
+
+  let rootObj: Record<string, unknown> = {};
+  if (existing.kind === "present") {
+    const parsed = parseJsonOrJsoncObject(existing.raw);
+    if (!parsed.ok) {
+      return { reason: parsed.reason, status: "skipped-corrupt" };
+    }
+    rootObj = { ...parsed.value };
+  }
+
+  if (
+    rootObj.mcpServers !== undefined &&
+    (!rootObj.mcpServers || typeof rootObj.mcpServers !== "object" || Array.isArray(rootObj.mcpServers))
+  ) {
+    return {
+      reason: "`mcpServers` field exists but is not a JSON object",
+      status: "skipped-corrupt",
+    };
+  }
+
+  const existingServers = (rootObj.mcpServers as Record<string, unknown> | undefined) ?? {};
   rootObj.mcpServers = {
     ...existingServers,
-    [serverKey]: {
-      args: [...mcpEntry.args],
-      command: mcpEntry.command,
+    [params.serverKey]: {
+      args: [...params.mcpEntry.args],
+      command: params.mcpEntry.command,
     },
   };
 
-  await mkdir(dirname(jsonFilePath), { recursive: true });
-  await writeFile(jsonFilePath, `${JSON.stringify(rootObj, null, 2)}\n`, "utf8");
+  const nextContent = `${JSON.stringify(rootObj, null, 2)}\n`;
+  return backupAndWriteAtomic({
+    backupDir: params.backupDir,
+    existingRaw: existing.kind === "present" ? existing.raw : undefined,
+    filePath: params.jsonFilePath,
+    nextContent,
+    target: params.target,
+  });
 }
 
-async function mergeOpenCodeMcpConfig(
-  jsonFilePath: string,
-  serverKey: string,
-  commandArray: readonly string[],
-): Promise<void> {
+async function mergeOpenCodeMcpConfig(params: {
+  readonly jsonFilePath: string;
+  readonly serverKey: string;
+  readonly commandArray: readonly string[];
+  readonly backupDir?: string;
+  readonly target: HostInstallTarget;
+}): Promise<ConfigWriteOutcome> {
+  const existing = await readTextFileStrict(params.jsonFilePath);
+  if (existing.kind === "io-error") {
+    return { reason: existing.reason, status: "skipped-corrupt" };
+  }
+
   let rootObj: Record<string, unknown> = {};
-  try {
-    const raw = await readFile(jsonFilePath, "utf8");
-    const parsed = JSON.parse(raw.replace(/^\uFEFF/, ""));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      rootObj = parsed as Record<string, unknown>;
+  if (existing.kind === "present") {
+    const parsed = parseJsonOrJsoncObject(existing.raw);
+    if (!parsed.ok) {
+      return { reason: parsed.reason, status: "skipped-corrupt" };
     }
-  } catch {
-    // File absent or empty -> initialize fresh OpenCode config
+    rootObj = { ...parsed.value };
+  }
+
+  if (rootObj.mcp !== undefined && (!rootObj.mcp || typeof rootObj.mcp !== "object" || Array.isArray(rootObj.mcp))) {
+    return {
+      reason: "`mcp` field exists in opencode.json but is not a JSON object",
+      status: "skipped-corrupt",
+    };
   }
 
   if (!rootObj.$schema) {
     rootObj.$schema = "https://opencode.ai/config.json";
   }
 
-  const existingMcp =
-    rootObj.mcp && typeof rootObj.mcp === "object" && !Array.isArray(rootObj.mcp)
-      ? (rootObj.mcp as Record<string, unknown>)
-      : {};
-
+  const existingMcp = (rootObj.mcp as Record<string, unknown> | undefined) ?? {};
   rootObj.mcp = {
     ...existingMcp,
-    [serverKey]: {
-      command: [...commandArray],
+    [params.serverKey]: {
+      command: [...params.commandArray],
       enabled: true,
       type: "local",
     },
   };
 
-  await mkdir(dirname(jsonFilePath), { recursive: true });
-  await writeFile(jsonFilePath, `${JSON.stringify(rootObj, null, 2)}\n`, "utf8");
+  const nextContent = `${JSON.stringify(rootObj, null, 2)}\n`;
+  return backupAndWriteAtomic({
+    backupDir: params.backupDir,
+    existingRaw: existing.kind === "present" ? existing.raw : undefined,
+    filePath: params.jsonFilePath,
+    nextContent,
+    target: params.target,
+  });
 }
 
 async function copyTreeRecursive(srcDir: string, dstDir: string, overwrite: boolean): Promise<void> {
@@ -310,12 +574,38 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     if (await pathExists(join(home, ".cursor"))) selectedTargets.add("cursor");
   }
 
+  const backupDir = join(home, ".vetoboard-mcp", "backups");
+  const allBackupsCreated: string[] = [];
+  const allSkippedCorruptFiles: SkippedCorruptConfigNotice[] = [];
   const installed: InstalledHostSummary[] = [];
+
+  const recordConfigOutcome = (
+    target: HostInstallTarget,
+    filePath: string,
+    outcome: ConfigWriteOutcome,
+    targetFiles: string[],
+    targetBackups: string[],
+    targetSkipped: SkippedCorruptConfigNotice[],
+  ): void => {
+    if (outcome.status === "skipped-corrupt") {
+      const notice: SkippedCorruptConfigNotice = { filePath, reason: outcome.reason, target };
+      targetSkipped.push(notice);
+      allSkippedCorruptFiles.push(notice);
+      return;
+    }
+    targetFiles.push(filePath);
+    if (outcome.status === "written" && outcome.backupPath) {
+      targetBackups.push(outcome.backupPath);
+      allBackupsCreated.push(outcome.backupPath);
+    }
+  };
 
   // 1. Antigravity Full Plugin Bundle (`~/.gemini/config/plugins/vetoboard-mcp/`)
   if (selectedTargets.has("antigravity")) {
     const plugRoot = join(home, ".gemini", "config", "plugins", "vetoboard-mcp");
     const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
     const pluginJsonPath = join(plugRoot, "plugin.json");
     const mcpJsonPath = join(plugRoot, "mcp_config.json");
@@ -332,7 +622,7 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const pluginManifest = {
       author: "VetoBoard Contributors",
       description:
-        "Dynamic Shared Whiteboard, ELECTRE/QMV mathematical dominance, non-compensatory Hard Veto gates, and zero-hallucination vetoboard_calc math verification (EN/ZH).",
+        "Dynamic Shared Whiteboard, ELECTRE/QMV mathematical dominance, non-compensatory Hard Veto gates, and deterministic vetoboard_calc math verification (EN/ZH).",
       displayName: "VetoBoard Governance & Hard-Veto Whiteboard",
       logo: "assets/logo.svg",
       name: "vetoboard-mcp",
@@ -345,7 +635,15 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     };
 
     await writeFile(pluginJsonPath, `${JSON.stringify(pluginManifest, null, 2)}\n`, "utf8");
-    await mergeJsonMcpServerConfig(mcpJsonPath, "vetoboard-mcp_engine", mcpEntry);
+    const agyMcpOut = await mergeJsonMcpServerConfig({
+      backupDir,
+      jsonFilePath: mcpJsonPath,
+      mcpEntry,
+      serverKey: "vetoboard-mcp_engine",
+      target: "antigravity",
+    });
+    files.push(pluginJsonPath);
+    recordConfigOutcome("antigravity", mcpJsonPath, agyMcpOut, files, targetBackups, targetSkipped);
     await writeFile(rulePath, buildAntigravityAgentsRule(), "utf8");
     const agySkillMd = buildCrossPlatformSkillMarkdown("vetoboard-mcp_engine");
     await writeFile(skillShortPath, agySkillMd, "utf8");
@@ -359,13 +657,15 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(plugRoot, "skills"), true)
       : 0;
 
-    files.push(pluginJsonPath, mcpJsonPath, rulePath, skillShortPath, logoPath);
+    files.push(rulePath, skillShortPath, logoPath);
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: agyBundledCount,
       filesWritten: files,
       note: zh
         ? `已安装完整三位一体插件包（MCP 16 大角色 + 常驻护栏 AGENTS.md + /vetoboard + ${agyBundledCount} 个治理技能包）；在 Customizations 开启或点击 \`MCP Servers > Refresh\` 即可生效！`
         : `Installed full Antigravity plugin bundle (16 roles + AGENTS.md + /vetoboard + ${agyBundledCount} governance skills).`,
+      skippedCorruptFiles: targetSkipped,
       target: "antigravity",
     });
   }
@@ -375,8 +675,18 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const claudeJsonPath = join(home, ".claude.json");
     const claudeSkillPath = join(home, ".claude", "skills", "vetoboard", "SKILL.md");
     const claudeCmdPath = join(home, ".claude", "commands", "vetoboard.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
-    await mergeJsonMcpServerConfig(claudeJsonPath, "vetoboard", mcpEntry);
+    const claudeMcpOut = await mergeJsonMcpServerConfig({
+      backupDir,
+      jsonFilePath: claudeJsonPath,
+      mcpEntry,
+      serverKey: "vetoboard",
+      target: "claude",
+    });
+    recordConfigOutcome("claude", claudeJsonPath, claudeMcpOut, files, targetBackups, targetSkipped);
     await mkdir(dirname(claudeSkillPath), { recursive: true });
     await mkdir(dirname(claudeCmdPath), { recursive: true });
     await writeFile(claudeSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
@@ -394,16 +704,23 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       ].join("\n"),
       "utf8",
     );
+    files.push(claudeSkillPath, claudeCmdPath);
     const claudeBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".claude", "skills"), false)
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: claudeBundledCount,
-      filesWritten: [claudeJsonPath, claudeSkillPath, claudeCmdPath],
+      filesWritten: files,
       note: zh
-        ? `已自动写入 MCP 配置（含 16 大角色）、\`/vetoboard\` 斜杠命令与 ${claudeBundledCount} 个专业治理技能包！`
-        : `Configured \`.claude.json\` MCP server (16 roles), \`/vetoboard\` command, and ${claudeBundledCount} governance skills!`,
+        ? targetSkipped.length > 0
+          ? `已安装 \`/vetoboard\` 斜杠命令与 ${claudeBundledCount} 个治理技能包（检测到 \`~/.claude.json\` 原有语法异常，已保护性跳过未覆盖）！`
+          : `已自动安全合并 MCP 配置（含 16 大角色）、\`/vetoboard\` 斜杠命令与 ${claudeBundledCount} 个专业治理技能包！`
+        : targetSkipped.length > 0
+          ? `Installed \`/vetoboard\` command & ${claudeBundledCount} skills (skipped corrupt \`.claude.json\` without overwriting)!`
+          : `Safely merged \`.claude.json\` MCP server (16 roles), \`/vetoboard\` command, and ${claudeBundledCount} governance skills!`,
+      skippedCorruptFiles: targetSkipped,
       target: "claude",
     });
   }
@@ -412,20 +729,37 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
   if (selectedTargets.has("cursor")) {
     const cursorMcpPath = join(home, ".cursor", "mcp.json");
     const cursorSkillPath = join(home, ".cursor", "skills", "vetoboard", "SKILL.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
-    await mergeJsonMcpServerConfig(cursorMcpPath, "vetoboard", mcpEntry);
+    const cursorMcpOut = await mergeJsonMcpServerConfig({
+      backupDir,
+      jsonFilePath: cursorMcpPath,
+      mcpEntry,
+      serverKey: "vetoboard",
+      target: "cursor",
+    });
+    recordConfigOutcome("cursor", cursorMcpPath, cursorMcpOut, files, targetBackups, targetSkipped);
     await mkdir(dirname(cursorSkillPath), { recursive: true });
     await writeFile(cursorSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+    files.push(cursorSkillPath);
     const cursorBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".cursor", "skills"), false)
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: cursorBundledCount,
-      filesWritten: [cursorMcpPath, cursorSkillPath],
+      filesWritten: files,
       note: zh
-        ? `已自动合并 \`~/.cursor/mcp.json\` 并安装 \`vetoboard\` + ${cursorBundledCount} 个专业治理技能包！`
-        : `Merged \`~/.cursor/mcp.json\` and installed \`vetoboard\` + ${cursorBundledCount} governance skills!`,
+        ? targetSkipped.length > 0
+          ? `已安装 \`vetoboard\` + ${cursorBundledCount} 个治理技能包（检测到 \`~/.cursor/mcp.json\` 原有语法异常，已保护性跳过未覆盖）！`
+          : `已自动安全合并 \`~/.cursor/mcp.json\` 并安装 \`vetoboard\` + ${cursorBundledCount} 个专业治理技能包！`
+        : targetSkipped.length > 0
+          ? `Installed \`vetoboard\` + ${cursorBundledCount} skills (skipped corrupt \`~/.cursor/mcp.json\` without overwriting)!`
+          : `Safely merged \`~/.cursor/mcp.json\` and installed \`vetoboard\` + ${cursorBundledCount} governance skills!`,
+      skippedCorruptFiles: targetSkipped,
       target: "cursor",
     });
   }
@@ -434,30 +768,57 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
   if (selectedTargets.has("codex")) {
     const codexTomlPath = join(home, ".codex", "config.toml");
     const codexSkillPath = join(home, ".codex", "skills", "vetoboard", "SKILL.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
+
     await mkdir(dirname(codexSkillPath), { recursive: true });
     await writeFile(codexSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
 
-    let existingToml = "";
-    try {
-      existingToml = await readFile(codexTomlPath, "utf8");
-    } catch {
-      // Create new config.toml
+    const codexRead = await readTextFileStrict(codexTomlPath);
+    let codexOutcome: ConfigWriteOutcome;
+    if (codexRead.kind === "io-error") {
+      codexOutcome = { reason: codexRead.reason, status: "skipped-corrupt" };
+    } else {
+      const existingToml = codexRead.kind === "present" ? codexRead.raw : "";
+      const tomlErr = codexRead.kind === "present" ? validateTomlSafeToAppend(existingToml) : undefined;
+      if (tomlErr) {
+        codexOutcome = { reason: tomlErr, status: "skipped-corrupt" };
+      } else if (/\[mcp_servers\.vetoboard\]/i.test(existingToml)) {
+        codexOutcome = { status: "unchanged" };
+      } else {
+        const argsToml = mcpEntry.args.map((a) => JSON.stringify(a)).join(", ");
+        const block = `[mcp_servers.vetoboard]\ncommand = ${JSON.stringify(mcpEntry.command)}\nargs = [${argsToml}]\n`;
+        const nextToml =
+          existingToml.trim().length > 0 ? `${existingToml.trimEnd()}\n\n${block}` : block;
+        codexOutcome = await backupAndWriteAtomic({
+          backupDir,
+          existingRaw: codexRead.kind === "present" ? codexRead.raw : undefined,
+          filePath: codexTomlPath,
+          nextContent: nextToml,
+          target: "codex",
+        });
+      }
     }
-    if (!/\[mcp_servers\.vetoboard\]/i.test(existingToml)) {
-      const argsToml = mcpEntry.args.map((a) => JSON.stringify(a)).join(", ");
-      const block = `\n[mcp_servers.vetoboard]\ncommand = ${JSON.stringify(mcpEntry.command)}\nargs = [${argsToml}]\n`;
-      await writeFile(codexTomlPath, `${existingToml.trimEnd()}\n${block}`, "utf8");
-    }
+    recordConfigOutcome("codex", codexTomlPath, codexOutcome, files, targetBackups, targetSkipped);
+    files.push(codexSkillPath);
+
     const codexBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".codex", "skills"), false)
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: codexBundledCount,
-      filesWritten: [codexTomlPath, codexSkillPath],
+      filesWritten: files,
       note: zh
-        ? `已自动写入 \`~/.codex/config.toml\` 并同步 \`vetoboard\` + ${codexBundledCount} 个专业治理技能包！`
-        : `Configured \`~/.codex/config.toml\` and synced \`vetoboard\` + ${codexBundledCount} governance skills!`,
+        ? targetSkipped.length > 0
+          ? `已同步 \`vetoboard\` + ${codexBundledCount} 个治理技能包（检测到 \`~/.codex/config.toml\` 原有语法异常，已保护性跳过未覆盖）！`
+          : `已自动安全写入 \`~/.codex/config.toml\` 并同步 \`vetoboard\` + ${codexBundledCount} 个专业治理技能包！`
+        : targetSkipped.length > 0
+          ? `Synced \`vetoboard\` + ${codexBundledCount} skills (skipped corrupt \`~/.codex/config.toml\` without overwriting)!`
+          : `Safely configured \`~/.codex/config.toml\` and synced \`vetoboard\` + ${codexBundledCount} governance skills!`,
+      skippedCorruptFiles: targetSkipped,
       target: "codex",
     });
   }
@@ -466,36 +827,91 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
   if (selectedTargets.has("hermes")) {
     const hermesYamlPath = join(home, ".hermes", "config.yaml");
     const hermesSkillPath = join(home, ".hermes", "skills", "vetoboard", "SKILL.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
+
     await mkdir(dirname(hermesSkillPath), { recursive: true });
     await writeFile(hermesSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
 
-    let existingYaml = "";
-    try {
-      existingYaml = await readFile(hermesYamlPath, "utf8");
-    } catch {
-      // Create fresh config.yaml
-    }
-    if (!/^\s*vetoboard\s*:/m.test(existingYaml)) {
-      const yamlArgs = mcpEntry.args.map((a) => `      - ${JSON.stringify(a)}`).join("\n");
-      const entryBlock = `  vetoboard:\n    command: ${JSON.stringify(mcpEntry.command)}\n    args:\n${yamlArgs}\n`;
-      if (/^mcp_servers\s*:/m.test(existingYaml)) {
-        const updated = existingYaml.replace(/^mcp_servers\s*:\s*\r?\n/m, (m) => `${m}${entryBlock}`);
-        await writeFile(hermesYamlPath, updated, "utf8");
+    const hermesRead = await readTextFileStrict(hermesYamlPath);
+    let hermesOutcome: ConfigWriteOutcome;
+    if (hermesRead.kind === "io-error") {
+      hermesOutcome = { reason: hermesRead.reason, status: "skipped-corrupt" };
+    } else {
+      const existingYaml = hermesRead.kind === "present" ? hermesRead.raw : "";
+      if (existingYaml.includes("\u0000")) {
+        hermesOutcome = { reason: "Contains binary NUL bytes", status: "skipped-corrupt" };
+      } else if (/^\s*vetoboard\s*:/m.test(existingYaml)) {
+        hermesOutcome = { status: "unchanged" };
       } else {
-        const sep = existingYaml.trim().length > 0 ? `${existingYaml.trimEnd()}\n\n` : "";
-        await writeFile(hermesYamlPath, `${sep}mcp_servers:\n${entryBlock}`, "utf8");
+        const yamlArgs = mcpEntry.args.map((a) => `      - ${JSON.stringify(a)}`).join("\n");
+        const entryBlock = `  vetoboard:\n    command: ${JSON.stringify(mcpEntry.command)}\n    args:\n${yamlArgs}\n`;
+        const headerMatch = /^mcp_servers\s*:(.*)$/m.exec(existingYaml);
+        let nextYaml: string | undefined;
+        let yamlErr: string | undefined;
+
+        if (headerMatch) {
+          const rest = headerMatch[1]!.trim();
+          if (rest === "" || rest.startsWith("#")) {
+            const normalized = existingYaml.endsWith("\n") ? existingYaml : `${existingYaml}\n`;
+            nextYaml = normalized.replace(
+              /^mcp_servers\s*:(?:\s*#.*)?\r?\n/m,
+              (m) => `${m}${entryBlock}`,
+            );
+          } else if (/^(?:\{\s*\}|null|~)(?:\s*#.*)?$/i.test(rest)) {
+            nextYaml = existingYaml.replace(
+              /^mcp_servers\s*:.*(?:\r?\n|$)/m,
+              `mcp_servers:\n${entryBlock}`,
+            );
+          } else {
+            yamlErr = "`mcp_servers` in config.yaml is not a YAML mapping (refusing to overwrite)";
+          }
+        } else {
+          const trimmedStart = existingYaml.trimStart();
+          if (trimmedStart.startsWith("{") || trimmedStart.startsWith("[")) {
+            yamlErr = "Unexpected JSON/array root in config.yaml (refusing to overwrite)";
+          } else {
+            const sep = existingYaml.trim().length > 0 ? `${existingYaml.trimEnd()}\n\n` : "";
+            nextYaml = `${sep}mcp_servers:\n${entryBlock}`;
+          }
+        }
+
+        if (yamlErr || nextYaml === undefined) {
+          hermesOutcome = {
+            reason: yamlErr ?? "Malformed config.yaml",
+            status: "skipped-corrupt",
+          };
+        } else {
+          hermesOutcome = await backupAndWriteAtomic({
+            backupDir,
+            existingRaw: hermesRead.kind === "present" ? hermesRead.raw : undefined,
+            filePath: hermesYamlPath,
+            nextContent: nextYaml,
+            target: "hermes",
+          });
+        }
       }
     }
+    recordConfigOutcome("hermes", hermesYamlPath, hermesOutcome, files, targetBackups, targetSkipped);
+    files.push(hermesSkillPath);
+
     const hermesBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(home, ".hermes", "skills"), false)
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: hermesBundledCount,
-      filesWritten: [hermesYamlPath, hermesSkillPath],
+      filesWritten: files,
       note: zh
-        ? `已自动写入 \`~/.hermes/config.yaml\` 并同步 \`vetoboard\` + ${hermesBundledCount} 个专业治理技能包！`
-        : `Configured \`~/.hermes/config.yaml\` and synced \`vetoboard\` + ${hermesBundledCount} governance skills!`,
+        ? targetSkipped.length > 0
+          ? `已同步 \`vetoboard\` + ${hermesBundledCount} 个治理技能包（检测到 \`~/.hermes/config.yaml\` 原有格式异常，已保护性跳过未覆盖）！`
+          : `已自动安全写入 \`~/.hermes/config.yaml\` 并同步 \`vetoboard\` + ${hermesBundledCount} 个专业治理技能包！`
+        : targetSkipped.length > 0
+          ? `Synced \`vetoboard\` + ${hermesBundledCount} skills (skipped corrupt \`~/.hermes/config.yaml\` without overwriting)!`
+          : `Safely configured \`~/.hermes/config.yaml\` and synced \`vetoboard\` + ${hermesBundledCount} governance skills!`,
+      skippedCorruptFiles: targetSkipped,
       target: "hermes",
     });
   }
@@ -504,13 +920,21 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
   if (selectedTargets.has("opencode")) {
     const opencodeJsonPath = join(home, ".config", "opencode", "opencode.json");
     const opencodeSkillPath = join(home, ".config", "opencode", "skills", "vetoboard", "SKILL.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
-    await mergeOpenCodeMcpConfig(opencodeJsonPath, "vetoboard", [
-      mcpEntry.command,
-      ...mcpEntry.args,
-    ]);
+    const opencodeMcpOut = await mergeOpenCodeMcpConfig({
+      backupDir,
+      commandArray: [mcpEntry.command, ...mcpEntry.args],
+      jsonFilePath: opencodeJsonPath,
+      serverKey: "vetoboard",
+      target: "opencode",
+    });
+    recordConfigOutcome("opencode", opencodeJsonPath, opencodeMcpOut, files, targetBackups, targetSkipped);
     await mkdir(dirname(opencodeSkillPath), { recursive: true });
     await writeFile(opencodeSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+    files.push(opencodeSkillPath);
     const opencodeBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(
           bundledSkillsRoot,
@@ -520,11 +944,17 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: opencodeBundledCount,
-      filesWritten: [opencodeJsonPath, opencodeSkillPath],
+      filesWritten: files,
       note: zh
-        ? `已自动写入 OpenCode / T3 Code 专属 \`opencode.json\`（\`mcp\` 数组格式）与 ${opencodeBundledCount} 个治理技能包！`
-        : `Configured OpenCode / T3 Code \`opencode.json\` (\`mcp\` array schema) and ${opencodeBundledCount} governance skills!`,
+        ? targetSkipped.length > 0
+          ? `已安装 ${opencodeBundledCount} 个治理技能包（检测到 \`opencode.json\` 原有语法异常，已保护性跳过未覆盖）！`
+          : `已自动安全写入 OpenCode / T3 Code 专属 \`opencode.json\`（兼容 JSONC）与 ${opencodeBundledCount} 个治理技能包！`
+        : targetSkipped.length > 0
+          ? `Installed ${opencodeBundledCount} skills (skipped corrupt \`opencode.json\` without overwriting)!`
+          : `Safely configured OpenCode / T3 Code \`opencode.json\` (\`mcp\` array schema) and ${opencodeBundledCount} governance skills!`,
+      skippedCorruptFiles: targetSkipped,
       target: "opencode",
     });
   }
@@ -538,11 +968,13 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       : 0;
 
     installed.push({
+      backupsCreated: [],
       bundledSkillsInstalledCount: t3BundledCount,
       filesWritten: [t3SkillPath],
       note: zh
         ? `已就绪 T3 Code 多 Harness（Claude Code / Codex / Cursor / OpenCode）跨模型混编与 ${t3BundledCount} 个治理技能包！`
         : `Configured T3 Code multi-harness bundle and ${t3BundledCount} governance skills!`,
+      skippedCorruptFiles: [],
       target: "t3code",
     });
   }
@@ -552,26 +984,77 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const wsMcpPath = join(ws, ".mcp.json");
     const wsSkillPath = join(ws, ".agents", "skills", "vetoboard", "SKILL.md");
     const wsRulePath = join(ws, ".agents", "rules", "vetoboard.md");
+    const files: string[] = [];
+    const targetBackups: string[] = [];
+    const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
-    await mergeJsonMcpServerConfig(wsMcpPath, "vetoboard", mcpEntry);
+    const wsMcpOut = await mergeJsonMcpServerConfig({
+      backupDir,
+      jsonFilePath: wsMcpPath,
+      mcpEntry,
+      serverKey: "vetoboard",
+      target: "workspace",
+    });
+    recordConfigOutcome("workspace", wsMcpPath, wsMcpOut, files, targetBackups, targetSkipped);
     await mkdir(dirname(wsSkillPath), { recursive: true });
     await mkdir(dirname(wsRulePath), { recursive: true });
     const skillMd = buildCrossPlatformSkillMarkdown("vetoboard");
     await writeFile(wsSkillPath, skillMd, "utf8");
     await writeFile(wsRulePath, skillMd, "utf8");
+    files.push(wsSkillPath, wsRulePath);
     const wsBundledCount = shouldSyncSkills
       ? await syncBundledGovernanceSkills(bundledSkillsRoot, join(ws, ".agents", "skills"), false)
       : 0;
 
     installed.push({
+      backupsCreated: targetBackups,
       bundledSkillsInstalledCount: wsBundledCount,
-      filesWritten: [wsMcpPath, wsSkillPath, wsRulePath],
+      filesWritten: files,
       note: zh
-        ? `已在当前项目目录 \`${ws}\` 生成完整 \`.mcp.json\` + \`.agents/\` 规则与 ${wsBundledCount} 个治理技能包！`
-        : `Installed workspace-scoped \`.mcp.json\` + \`.agents/\` rule & ${wsBundledCount} governance skills in \`${ws}\`!`,
+        ? targetSkipped.length > 0
+          ? `已在 \`${ws}\` 安装 \`.agents/\` 规则与 ${wsBundledCount} 个治理技能包（检测到 \`.mcp.json\` 原有语法异常，已保护性跳过未覆盖）！`
+          : `已在当前项目目录 \`${ws}\` 安全生成 \`.mcp.json\` + \`.agents/\` 规则与 ${wsBundledCount} 个治理技能包！`
+        : targetSkipped.length > 0
+          ? `Installed workspace \`.agents/\` rule & ${wsBundledCount} skills in \`${ws}\` (skipped corrupt \`.mcp.json\` without overwriting)!`
+          : `Installed workspace-scoped \`.mcp.json\` + \`.agents/\` rule & ${wsBundledCount} governance skills in \`${ws}\`!`,
+      skippedCorruptFiles: targetSkipped,
       target: "workspace",
     });
   }
+
+  const backupBannerLines =
+    allBackupsCreated.length > 0
+      ? zh
+        ? [
+            "",
+            `💾 **修改前自动备份（共 ${allBackupsCreated.length} 份，随时可回滚）**：`,
+            ...allBackupsCreated.map((b) => `- \`${b}\``),
+          ]
+        : [
+            "",
+            `💾 **Automatic Pre-Modification Backups (${allBackupsCreated.length} saved)**:`,
+            ...allBackupsCreated.map((b) => `- \`${b}\``),
+          ]
+      : [];
+
+  const corruptWarningLines =
+    allSkippedCorruptFiles.length > 0
+      ? zh
+        ? [
+            "",
+            `⚠️ **保护性跳过提醒（检测到原配置文件存在语法损坏，已严格保留原文件未做覆盖！）**：`,
+            ...allSkippedCorruptFiles.map(
+              (s) => `- **${s.target.toUpperCase()}** \`${s.filePath}\`：${s.reason}`,
+            ),
+          ]
+        : [
+            "",
+            `⚠️ **Fail-Closed Protection (Skipped corrupt config files without overwriting!)**:`,
+            ...allSkippedCorruptFiles.map(
+              (s) => `- **${s.target.toUpperCase()}** \`${s.filePath}\`: ${s.reason}`,
+            ),
+          ]
+      : [];
 
   const lines = zh
     ? [
@@ -581,6 +1064,8 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
           (item) =>
             `- ✅ **${item.target.toUpperCase()}**：${item.note}\n  - 写入文件：${item.filesWritten.map((f) => `\`${f}\``).join(" · ")}`,
         ),
+        ...backupBannerLines,
+        ...corruptWarningLines,
         "",
         "### ⚡ 下一步怎么直接开用？",
         "1. 在你的客户端点击一次 `MCP Servers > Refresh`（若是首次在 Antigravity 安装，在 Customizations 页面把 `vetoboard-mcp` 打开开关即可，免重启）；",
@@ -593,6 +1078,8 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
           (item) =>
             `- ✅ **${item.target.toUpperCase()}**: ${item.note}\n  - Files: ${item.filesWritten.map((f) => `\`${f}\``).join(" · ")}`,
         ),
+        ...backupBannerLines,
+        ...corruptWarningLines,
         "",
         "### ⚡ Ready to Use",
         "1. Click `MCP Servers > Refresh` in your IDE (or toggle `vetoboard-mcp` ON in Antigravity Customizations);",
@@ -600,8 +1087,10 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
       ];
 
   return {
+    backupsCreated: allBackupsCreated,
     commandMode,
     installed,
     markdown: lines.join("\n"),
+    skippedCorruptFiles: allSkippedCorruptFiles,
   };
 }

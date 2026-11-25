@@ -113,9 +113,12 @@ async function upsertMarkedRuleSection(
   let existing = "";
   try {
     existing = await readFile(filePath, "utf8");
-  } catch {
-    await writeFile(filePath, wrapped, "utf8");
-    return;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      await writeFile(filePath, wrapped, "utf8");
+      return;
+    }
+    throw err;
   }
 
   const startIdx = existing.indexOf(beginMarker);

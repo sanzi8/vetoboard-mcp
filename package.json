@@ -1,7 +1,7 @@
 {
   "name": "vetoboard-mcp",
-  "version": "1.4.0",
-  "description": "Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Governance, 16 Specialist Roles, 27 Governance Skills & Zero-Hallucination Math Auditing MCP Server for Claude Code, Cursor, Antigravity, Codex, Hermes & T3 Code.",
+  "version": "1.4.1",
+  "description": "Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Governance, 16 Specialist Roles, 27 Governance Skills & Deterministic Math Auditing MCP Server for Claude Code, Cursor, Antigravity, Codex, Hermes & T3 Code.",
   "author": "sanzi8",
   "license": "Apache-2.0",
   "homepage": "https://github.com/sanzi8/vetoboard-mcp#readme",

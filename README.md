@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/MCP-Protocol%202025-1a73e8?style=flat-square" alt="MCP Protocol" />
-  <img src="https://img.shields.io/badge/Version-1.4.0-34a853?style=flat-square" alt="Version 1.4.0" />
+  <img src="https://img.shields.io/badge/Version-1.4.1-34a853?style=flat-square" alt="Version 1.4.1" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-fbbc04?style=flat-square" alt="Apache 2.0 License" />
   <img src="https://img.shields.io/badge/Platform-Claude%20Code%20%7C%20Cursor%20%7C%20Antigravity%20%7C%20Codex%20%7C%20Hermes%20%7C%20T3%20Code-ea4335?style=flat-square" alt="Supported Platforms" />
 </p>
@@ -29,13 +29,13 @@
 无需自己打开终端敲命令，直接把下面这段话复制粘贴进 **Antigravity / Claude Code / Cursor / Codex / Hermes / T3 Code** 的对话框中发送，让 AI 自动帮你装好：
 
 ```text
-帮我安装 https://github.com/sanzi8/vetoboard-mcp ：请下载最新 Release 中的 vetoboard-mcp-v1.4.0.zip 解压到本地固定目录（如 ~/.vetoboard-mcp/runtime），然后在该目录执行 node ./dist/cli.js init --local-bin 完成全自动安装配置。
+帮我安装 https://github.com/sanzi8/vetoboard-mcp ：请下载最新 Release 中的 vetoboard-mcp-v1.4.1.zip 解压到本地固定目录（如 ~/.vetoboard-mcp/runtime），然后在该目录执行 node ./dist/cli.js init --local-bin 完成全自动安装配置。
 ```
 
 智能体执行完毕后，在客户端点击一次 **`MCP Servers > Refresh`**（Antigravity 首次安装可在 `Customizations` 页面确认开启 `vetoboard-mcp`）即可立即使用！
 
 ### 方式 2：手动下载 Release 免编译整合包安装
-1. 前往本仓库的 **[Releases 页面](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**，下载最新的 `vetoboard-mcp-v1.4.0.zip` 并解压到本地任意固定文件夹（如 `D:\tools\vetoboard-mcp`）。
+1. 前往本仓库的 **[Releases 页面](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**，下载最新的 `vetoboard-mcp-v1.4.1.zip` 并解压到本地任意固定文件夹（如 `D:\tools\vetoboard-mcp`）。
 2. 在解压后的文件夹内打开终端（PowerShell / Terminal），运行以下一行命令：
    ```bash
    node ./dist/cli.js init --local-bin

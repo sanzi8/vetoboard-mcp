@@ -729,4 +729,107 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(sweIds).toContain("frontend-engineer");
     expect(sweIds).toContain("code-reviewer");
   });
+
+  it("8. Safe Host Config Guard: refuses to overwrite corrupt JSON/TOML/YAML, merges JSONC comments & trailing commas, and creates atomic .bak backups before modifying existing configs", async () => {
+    // 8a. Corrupt configs MUST NEVER be overwritten (Fail-Closed byte-for-byte preservation)
+    const corruptHome = join(tempDir, "corrupt-home");
+    await mkdir(join(corruptHome, ".claude"), { recursive: true });
+    await mkdir(join(corruptHome, ".cursor"), { recursive: true });
+    await mkdir(join(corruptHome, ".codex"), { recursive: true });
+    await mkdir(join(corruptHome, ".hermes"), { recursive: true });
+
+    const brokenClaudeRaw = '{\n  "theme": "dark",\n  "mcpServers": {\n    "precious": { "command": "node"\n';
+    const brokenCursorRaw = '[\n  "unexpected-root-array-do-not-wipe"\n]\n';
+    const brokenCodexRaw = 'model = "o3"\nprompt = """unclosed multiline string\n';
+    const brokenHermesRaw = 'model: deepseek-chat\nmcp_servers: "invalid-scalar-not-a-map"\n';
+
+    await writeFile(join(corruptHome, ".claude.json"), brokenClaudeRaw, "utf8");
+    await writeFile(join(corruptHome, ".cursor", "mcp.json"), brokenCursorRaw, "utf8");
+    await writeFile(join(corruptHome, ".codex", "config.toml"), brokenCodexRaw, "utf8");
+    await writeFile(join(corruptHome, ".hermes", "config.yaml"), brokenHermesRaw, "utf8");
+
+    const corruptRes = await runHostInit({
+      homeDirOverride: corruptHome,
+      includeBundledSkills: false,
+      locale: "zh",
+      preferNpx: true,
+    });
+
+    // Byte-for-byte original contents MUST remain untouched!
+    expect(await readFile(join(corruptHome, ".claude.json"), "utf8")).toBe(brokenClaudeRaw);
+    expect(await readFile(join(corruptHome, ".cursor", "mcp.json"), "utf8")).toBe(brokenCursorRaw);
+    expect(await readFile(join(corruptHome, ".codex", "config.toml"), "utf8")).toBe(brokenCodexRaw);
+    expect(await readFile(join(corruptHome, ".hermes", "config.yaml"), "utf8")).toBe(brokenHermesRaw);
+    expect(corruptRes.skippedCorruptFiles?.length).toBe(4);
+    expect(corruptRes.markdown).toContain("保护性跳过");
+
+    // 8b. JSONC (comments + URLs + trailing commas) + YAML `mcp_servers: {}` + automatic `.bak` backup + idempotent re-run
+    const safeHome = join(tempDir, "safe-backup-home");
+    await mkdir(join(safeHome, ".claude"), { recursive: true });
+    await mkdir(join(safeHome, ".config", "opencode"), { recursive: true });
+    await mkdir(join(safeHome, ".hermes"), { recursive: true });
+
+    const originalClaudeRaw = '{\n  "oauthAccount": "keep-me",\n  "mcpServers": {\n    "git": { "command": "npx", "args": ["git-mcp"] }\n  }\n}\n';
+    const jsoncOpenCodeRaw = [
+      "{",
+      '  // OpenCode supports JSONC comments and URLs like https://opencode.ai/config.json',
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  /* Keep existing MCP servers and trailing commas */',
+      '  "mcp": {',
+      '    "existing": { "type": "local", "command": ["echo", "https://example.com//not-comment"], "enabled": true, },',
+      "  },",
+      "}",
+    ].join("\n");
+    const emptyMapHermesRaw = "model: deepseek-chat\nmcp_servers: {}\n";
+
+    await writeFile(join(safeHome, ".claude.json"), originalClaudeRaw, "utf8");
+    await writeFile(join(safeHome, ".config", "opencode", "opencode.json"), jsoncOpenCodeRaw, "utf8");
+    await writeFile(join(safeHome, ".hermes", "config.yaml"), emptyMapHermesRaw, "utf8");
+
+    const safeRes1 = await runHostInit({
+      homeDirOverride: safeHome,
+      includeBundledSkills: false,
+      locale: "zh",
+      platformOverride: "linux",
+      preferNpx: true,
+    });
+
+    expect(safeRes1.skippedCorruptFiles ?? []).toHaveLength(0);
+    expect(safeRes1.backupsCreated?.length).toBe(3);
+
+    // Verify backups match exact original pre-modification bytes!
+    const claudeBackupPath = safeRes1.backupsCreated!.find((p) => p.includes(".claude.json"))!;
+    const openCodeBackupPath = safeRes1.backupsCreated!.find((p) => p.includes("opencode.json"))!;
+    const hermesBackupPath = safeRes1.backupsCreated!.find((p) => p.includes("config.yaml"))!;
+    expect(await readFile(claudeBackupPath, "utf8")).toBe(originalClaudeRaw);
+    expect(await readFile(openCodeBackupPath, "utf8")).toBe(jsoncOpenCodeRaw);
+    expect(await readFile(hermesBackupPath, "utf8")).toBe(emptyMapHermesRaw);
+
+    // Verify merged outputs preserved every field, URL string, and added `vetoboard`
+    const mergedClaude = JSON.parse(await readFile(join(safeHome, ".claude.json"), "utf8"));
+    expect(mergedClaude.oauthAccount).toBe("keep-me");
+    expect(mergedClaude.mcpServers.git).toBeDefined();
+    expect(mergedClaude.mcpServers.vetoboard).toBeDefined();
+
+    const mergedOpenCode = JSON.parse(
+      await readFile(join(safeHome, ".config", "opencode", "opencode.json"), "utf8"),
+    );
+    expect(mergedOpenCode.mcp.existing.command).toEqual(["echo", "https://example.com//not-comment"]);
+    expect(mergedOpenCode.mcp.vetoboard).toBeDefined();
+
+    const mergedHermes = await readFile(join(safeHome, ".hermes", "config.yaml"), "utf8");
+    expect(mergedHermes).toContain("model: deepseek-chat");
+    expect(mergedHermes).not.toContain("mcp_servers: {}");
+    expect(mergedHermes).toContain("vetoboard:");
+
+    // Re-running when already up-to-date MUST be idempotent (0 new backups created!)
+    const safeRes2 = await runHostInit({
+      homeDirOverride: safeHome,
+      includeBundledSkills: false,
+      locale: "zh",
+      platformOverride: "linux",
+      preferNpx: true,
+    });
+    expect(safeRes2.backupsCreated ?? []).toHaveLength(0);
+  });
 });
