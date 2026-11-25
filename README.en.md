@@ -16,28 +16,37 @@
   <a href="./README.md">简体中文</a> | <b><a href="./README.en.md">English</a></b>
 </p>
 
+> [!TIP]
+> **Design Philosophy & Smart Model Sizing (Read First)**:
+> - **Trading Time & Structured Tokens for High-Reliability Accuracy**: VetoBoard replaces single-shot sycophancy and mental-math hallucinations with concurrent live web grounding, shared whiteboard cross-examination, `ELECTRE/QMV` mathematical dominance voting, and `vetoboard_calc` 0.5%-tolerance arithmetic verification.
+> - **Running Frontier Models on Every Seat Is Pure Waste — Use `Flash` Tiers!**: Because structural cross-checking and deterministic math gates handle error correction, **stacking expensive flagship models (e.g., all-Opus / all-GPT-5) across every specialist role wastes both quota and latency**. We strongly recommend fast, cost-effective models such as **`Gemini Flash`**, **`DeepSeek-V3`**, or **`Claude Haiku / Sonnet`** for specialist seats (optionally pairing 1 cross-family model on the final read-only Inspector), saving **70%–85%** of tokens with zero loss in audit rigor.
+
 ---
 
 ## 📦 1. Installation
 
-### Option 1: Download Pre-Built Release Bundle (Recommended · Zero Build Step)
+### ⭐ Option 1: Paste One Prompt into Your AI Agent (Zero Manual Terminal Work)
+Simply paste the prompt below directly into **Antigravity, Claude Code, Cursor, Codex, Hermes, or T3 Code** and let your agent install it for you:
+
+```text
+Please install https://github.com/sanzi8/vetoboard-mcp for me: download vetoboard-mcp-v1.4.0.zip from the latest GitHub Release, extract it to ~/.vetoboard-mcp/runtime, and run `node ./dist/cli.js init --local-bin`.
+```
+
+Then click **`MCP Servers > Refresh`** in your IDE (or toggle `vetoboard-mcp` ON in Antigravity `Customizations`)!
+
+### Option 2: Download Pre-Built Release Bundle Manually
 1. Visit **[Releases](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**, download `vetoboard-mcp-v1.4.0.zip`, and extract it to a permanent folder.
 2. Run the 1-command installer inside the extracted folder:
    ```bash
    node ./dist/cli.js init --local-bin
    ```
-3. The installer automatically detects **Antigravity, Claude Code, Cursor, OpenAI Codex, Hermes Agent, and OpenCode / T3 Code**, non-destructively installing:
-   - **MCP Server** (13 tools with cross-vendor DeepSeek/OpenAI/Gemini JSON Schema sanitizer)
-   - **Always-On Guardrail Rules (`AGENTS.md`)** + **`/vetoboard` Slash Command / Skill**
-   - **16 Bilingual Specialist Roles + 27 Bundled Pure-Text Governance Skills**
-4. Click **`MCP Servers > Refresh`** in your IDE and start using `/vetoboard`!
+3. The installer automatically detects **Antigravity, Claude Code, Cursor, OpenAI Codex, Hermes Agent, and OpenCode / T3 Code**, non-destructively installing the MCP server, guardrail rules, `/vetoboard` command, **16 bilingual specialist roles**, and **27 pure-text governance skills**.
 
-### Option 2: Clone & Build from Source
+### Option 3: Clone & Build from Source
 ```bash
 git clone https://github.com/sanzi8/vetoboard-mcp.git
 cd vetoboard-mcp
-pnpm install
-pnpm run build
+pnpm install && pnpm run build
 node ./dist/cli.js init --local-bin
 ```
 

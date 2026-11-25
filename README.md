@@ -16,11 +16,25 @@
   <b><a href="./README.md">简体中文</a></b> | <a href="./README.en.md">English</a>
 </p>
 
+> [!TIP]
+> **核心机制与模型省配铁律（必看）**：
+> - **用时间与结构化 Token 换取推理准确性**：VetoBoard 的本质是通过「多角色并发联网取证 + 共享白板交叉质询 + `ELECTRE/QMV` 数学支配裁决 + `vetoboard_calc` 0.5% 容差独立复算」，以一定的执行时间与多轮 Token 消耗为代价，彻底消灭单模型顺从迎合与心算幻觉，换取高可靠决策结论。
+> - **全员上顶级旗舰模型纯属浪费！强烈推荐 `Flash` 等轻量模型**：架构自带白板互审与确定性代码算账兜底，**给所有专员席位堆砌昂贵的旗舰模型（如全员 Claude Opus / GPT-5）纯属浪费额度与时间**。日常主力席位强烈优先选用 **`Gemini Flash`**、**`DeepSeek-V3`**、**`Claude Haiku / Sonnet`** 等高速高性价比模型（最多仅给殿后的「独立铁面督察官」配一个异构推理模型把关），即可省下 **70%–85%** 额度且核账精度丝毫不减！
+
 ---
 
 ## 📦 一、安装教程 (Installation)
 
-### 方式 1：直接下载 Release 免编译整合包（推荐新手 · 3 秒开箱即用）
+### ⭐ 方式 1：复制一句话发给智能体自动安装（最推荐 · 全程零手动）
+无需自己打开终端敲命令，直接把下面这段话复制粘贴进 **Antigravity / Claude Code / Cursor / Codex / Hermes / T3 Code** 的对话框中发送，让 AI 自动帮你装好：
+
+```text
+帮我安装 https://github.com/sanzi8/vetoboard-mcp ：请下载最新 Release 中的 vetoboard-mcp-v1.4.0.zip 解压到本地固定目录（如 ~/.vetoboard-mcp/runtime），然后在该目录执行 node ./dist/cli.js init --local-bin 完成全自动安装配置。
+```
+
+智能体执行完毕后，在客户端点击一次 **`MCP Servers > Refresh`**（Antigravity 首次安装可在 `Customizations` 页面确认开启 `vetoboard-mcp`）即可立即使用！
+
+### 方式 2：手动下载 Release 免编译整合包安装
 1. 前往本仓库的 **[Releases 页面](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**，下载最新的 `vetoboard-mcp-v1.4.0.zip` 并解压到本地任意固定文件夹（如 `D:\tools\vetoboard-mcp`）。
 2. 在解压后的文件夹内打开终端（PowerShell / Terminal），运行以下一行命令：
    ```bash
@@ -30,27 +44,16 @@
    - **MCP 核心服务**（含 13 个治理工具与跨厂商 JSON Schema 兼容层）
    - **常驻护栏规则 (`AGENTS.md`)** + **`/vetoboard` 快捷唤醒命令**
    - **16 大双语专业角色库 + 27 个纯文本治理技能包**（自动对已有自定义技能做防覆盖保护）
-4. 回到客户端点击一次 **`MCP Servers > Refresh`**（Antigravity 首次安装可在 `Customizations` 中确认开启 `vetoboard-mcp`），即可立即使用！
+4. 回到客户端点击一次 **`MCP Servers > Refresh`** 即可生效。
 
-### 方式 2：通过 Git 克隆源码编译安装
+### 方式 3：通过 Git 克隆源码安装 / 手动指定平台
 ```bash
 git clone https://github.com/sanzi8/vetoboard-mcp.git
 cd vetoboard-mcp
-pnpm install
-pnpm run build
+pnpm install && pnpm run build
 node ./dist/cli.js init --local-bin
 ```
-*(若后续发布了新版本，直接在对话中说一句 **「更新 VetoBoard」** 或运行 `node ./dist/cli.js update` 即可自动安全拉取升级。)*
-
-### 方式 3：按平台手动指定或挂载 MCP 配置
-若只想为特定工具安装（或不希望同步内置的 27 个技能包），可附加参数：
-```bash
-# 仅针对指定客户端安装（支持 antigravity,claude,cursor,codex,hermes,opencode,t3code,workspace）
-node ./dist/cli.js init --local-bin --target claude,codex,t3code
-
-# 极简模式：仅安装 MCP 与 /vetoboard 主技能，不同步其余 27 个扩展治理技能
-node ./dist/cli.js init --local-bin --no-pack-skills
-```
+*(后续若有新版本，直接在对话框说一句 **「更新 VetoBoard」** 或运行 `node ./dist/cli.js update` 即可自动安全升级；若仅需针对特定工具或跳过扩展技能包，可附加 `--target claude,codex,t3code` 或 `--no-pack-skills`。)*
 
 <details>
 <summary><b>展开查看各客户端手动配置文件写法（Claude Code / Cursor / Codex / Hermes / OpenCode）</b></summary>
@@ -122,8 +125,8 @@ mcp_servers:
 
 ### 第 2 步：回复「开跑」（或一句话自由换模型 / 调权重 / 加专员）
 - **直接采用推荐配置**：回复 **`开跑`**（或 **`只留前 2 个角色开跑`**）；
-- **自由混编跨厂商模型与增减专员**：直接说人话即可，例如：
-  > `精算用 Opus，市场和工程用 Gemini Flash，督察用 GPT，工程降到 60 分，再加一个财务与人效 ROI 专员，开跑`
+- **自由混编模型与增减专员（推荐主力用 Flash 省额度）**：直接说人话即可，例如：
+  > `全部专员用 Gemini Flash，督察用 Claude Sonnet，再加一个财务与人效 ROI 专员，开跑`
 - 随后委员会将自动执行 4 步闭环：
   1. **并发联网摸底贴白板 (`board_post`)**：各专员在严格搜索配额内先调用 `search_web` 抓取真实市场现价、现行法规与通道费率（连续 2 次无果自动标 `[ASSUMPTION]` 止损防死循环）；
   2. **阅板留痕与运筹学数学裁决 (`board_review`)**：通过 **ELECTRE + 欧盟 QMV 双重多数模型**（焦点支配率 `D ≥ 60%/65%` · 全场和谐度 `C ≥ 66.7%` · 席位线 `≥ 50%`）结合**非补偿性硬死穴一票否决**（实测负毛利、编译报错、法规禁止）锁定共识参数，最多 2 轮零变化自动早停，拒绝无休止群聊消耗 Token；
@@ -211,32 +214,33 @@ sequenceDiagram
 ```text
 vetoboard-mcp/
 ├── assets/
-│   └── vetoboard-antigravity-demo.svg      # Antigravity 三分栏白板与 Swarm 协同动态演示图
+│   └── vetoboard-antigravity-demo.svg
 ├── packs/
-│   └── starter-governance.vetoboard-pack.json # 16 大双语角色宪章与基础治理规则包
-├── skills/                                 # 随包内置的 27 个纯文本商业与研发治理技能 (SKILL.md)
+│   └── starter-governance.vetoboard-pack.json
+├── skills/
 ├── scripts/
-│   └── smoke-llm-compat.mjs                # 零安装 Stdio 握手与 DeepSeek/OpenAI 实盘冒烟脚本
+│   └── smoke-llm-compat.mjs
 ├── src/
-│   ├── cli.ts                              # CLI 入口 (stdio MCP / init 一键安装 / serve / watch / calc)
-│   ├── index.ts                            # SDK 编程接口导出
+│   ├── cli.ts
+│   ├── index.ts
 │   ├── core/
-│   │   ├── whiteboardEngine.ts             # 办公室动态共享白板与 ELECTRE/QMV 运筹学裁决引擎
-│   │   ├── quantitativeCalc.ts             # 零幻觉递归下降求值、BEP 敏感度矩阵与 0.5% 容差核账器
-│   │   ├── roleCatalog.ts                  # 16 大内置角色目录、跨平台模型代际打分与智能阵容调度
-│   │   ├── skillRadar.ts                   # 跨 7 大客户端原生技能发现雷达与角色技能自动挂载
-│   │   ├── hostInstaller.ts                # 一行命令全自动宿主检测与三位一体无损安装器
-│   │   ├── citedBriefing.ts                # 双层可点击溯源角标 [[Sx·§y]] / [[V1]] 报告合成器
-│   │   ├── skillDistiller.ts               # 任务后一键沉淀技能/角色/规则/模板包并同步 IDE
-│   │   └── assetContribution.ts            # 方法 A 本地隐私脱敏预览、透明投递与一键无条件撤回
+│   │   ├── whiteboardEngine.ts
+│   │   ├── quantitativeCalc.ts
+│   │   ├── roleCatalog.ts
+│   │   ├── skillRadar.ts
+│   │   ├── hostInstaller.ts
+│   │   ├── citedBriefing.ts
+│   │   ├── skillDistiller.ts
+│   │   └── assetContribution.ts
 │   └── mcp/
-│       ├── server.ts                       # 13 大 MCP 工具注册与状态机门禁
-│       ├── schemaCompat.ts                 # 跨厂商 (DeepSeek/OpenAI/Gemini) JSON Schema 净化器
-│       └── httpServer.ts                   # 远程团队 Streamable HTTP MCP 服务端
-├── test/                                   # 20 项端到端全链路与 7 平台协议兼容回归测试套件
-├── LICENSE                                 # Apache License 2.0 开源协议
-├── README.md                               # 中文说明与保姆级图文教程
-└── README.en.md                            # English Documentation
+│       ├── server.ts
+│       ├── schemaCompat.ts
+│       └── httpServer.ts
+├── test/
+├── LICENSE
+├── NOTICE
+├── README.md
+└── README.en.md
 ```
 
 ---
