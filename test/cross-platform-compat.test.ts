@@ -11,6 +11,7 @@ import {
   auditToolSchemaForAllVendors,
   createVetoBoardMcpServer,
   discoverNativeSkills,
+  runExternalChatCompletion,
   runHostInit,
   VetoBoardTaskStore,
 } from "../src/index.js";
@@ -505,9 +506,9 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(md).toContain("`GPT-OSS 120B (Medium)`(100%)");
     expect(md).toContain("`Gemini 3.8 Flash [Low/Med/High]`(35%)");
 
-    // Verify BOTH top Quick-Start guide AND bottom Model/Weight Confirmation prompt exist (and zero `~...~` GFM strikethrough bug)!
-    expect(md.indexOf("⚡ **极速开跑")).toBeGreaterThan(0);
-    expect(md.indexOf("⚡ **极速开跑")).toBeLessThan(md.indexOf("| 拟上场席位 |"));
+    // Verify NO duplicate top Quick-Start prompt, ONLY bottom Model/Weight Confirmation prompt (and zero `~...~` GFM strikethrough bug)!
+    expect(md).not.toContain("⚡ **极速开跑");
+    expect(md.indexOf("| 拟上场席位 |")).toBeGreaterThan(0);
     expect(md.indexOf("💬 **请确认或直接对话选模型 / 调权重**")).toBeGreaterThan(
       md.indexOf("🛡️ 已激活底座硬门禁"),
     );
@@ -521,13 +522,14 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     }
   });
 
-  it("5. `vetoboard-mcp init` 1-Command Auto-Installer: configures full 3-in-1 bundle across Antigravity, Claude Code, Cursor, Codex & Hermes without clobbering existing configs", async () => {
+  it("5. `vetoboard-mcp init` 1-Command Auto-Installer: configures Antigravity, Claude Code, Cursor, Codex, Hermes, OpenCode & T3 Code (with Windows `cmd /c npx` guard)", async () => {
     const fakeHome = join(tempDir, "fake-init-home");
     await mkdir(join(fakeHome, ".gemini", "config"), { recursive: true });
     await mkdir(join(fakeHome, ".claude"), { recursive: true });
     await mkdir(join(fakeHome, ".cursor"), { recursive: true });
     await mkdir(join(fakeHome, ".codex"), { recursive: true });
     await mkdir(join(fakeHome, ".hermes"), { recursive: true });
+    await mkdir(join(fakeHome, ".t3code"), { recursive: true });
 
     // Pre-seed existing user MCP configs to prove non-destructive merging!
     await writeFile(
@@ -540,20 +542,29 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
       "model: deepseek-chat\nmcp_servers:\n  filesystem:\n    command: \"npx\"\n",
       "utf8",
     );
+    await mkdir(join(fakeHome, ".config", "opencode"), { recursive: true });
+    await writeFile(
+      join(fakeHome, ".config", "opencode", "opencode.json"),
+      JSON.stringify({ mcp: { existing: { command: ["echo", "ok"], enabled: true, type: "local" } } }, null, 2),
+      "utf8",
+    );
 
-    const initRes = await runHostInit({
+    const initResWin = await runHostInit({
       homeDirOverride: fakeHome,
       locale: "zh",
+      platformOverride: "win32",
       preferNpx: true,
     });
 
-    expect(initRes.commandMode).toBe("npx");
-    expect(initRes.installed.map((i) => i.target).sort()).toEqual([
+    expect(initResWin.commandMode).toBe("npx");
+    expect(initResWin.installed.map((i) => i.target).sort()).toEqual([
       "antigravity",
       "claude",
       "codex",
       "cursor",
       "hermes",
+      "opencode",
+      "t3code",
     ]);
 
     // 1. Antigravity full 3-in-1 plugin bundle check
@@ -569,20 +580,95 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(agyRule).toContain("markdownFilePath");
     expect(agySkill).toContain("name: vetoboard");
 
-    // 2. Claude Code preserved `github` + `theme` while adding `vetoboard` MCP + `/vetoboard` slash command!
+    // 2. Claude Code on Windows wraps npx with `cmd /c` while preserving `github` + `theme`!
     const claudeJson = JSON.parse(await readFile(join(fakeHome, ".claude.json"), "utf8"));
     expect(claudeJson.theme).toBe("dark");
     expect(claudeJson.mcpServers.github).toBeDefined();
-    expect(claudeJson.mcpServers.vetoboard.args).toContain("vetoboard-mcp@latest");
+    expect(claudeJson.mcpServers.vetoboard.command).toBe("cmd");
+    expect(claudeJson.mcpServers.vetoboard.args.slice(0, 3)).toEqual(["/c", "npx", "-y"]);
     const claudeSlash = await readFile(join(fakeHome, ".claude", "commands", "vetoboard.md"), "utf8");
     expect(claudeSlash).toContain("$ARGUMENTS");
 
-    // 3. Codex & Hermes configs preserved existing entries and added `vetoboard` idempotently!
+    // 3. Codex, Hermes & OpenCode (T3 Code) preserved existing entries and added `vetoboard`!
     const codexToml = await readFile(join(fakeHome, ".codex", "config.toml"), "utf8");
     expect(codexToml).toContain("[mcp_servers.vetoboard]");
     const hermesYaml = await readFile(join(fakeHome, ".hermes", "config.yaml"), "utf8");
     expect(hermesYaml).toContain("model: deepseek-chat");
     expect(hermesYaml).toContain("filesystem:");
     expect(hermesYaml).toContain("vetoboard:");
+
+    const opencodeJson = JSON.parse(
+      await readFile(join(fakeHome, ".config", "opencode", "opencode.json"), "utf8"),
+    );
+    expect(opencodeJson.$schema).toBe("https://opencode.ai/config.json");
+    expect(opencodeJson.mcp.existing).toBeDefined();
+    expect(opencodeJson.mcp.vetoboard).toEqual({
+      command: ["cmd", "/c", "npx", "-y", "vetoboard-mcp@latest", "--lang", "auto"],
+      enabled: true,
+      type: "local",
+    });
+
+    // 4. Verify POSIX (`linux` / `darwin`) keeps direct `npx` command without `cmd /c`
+    const fakeLinuxHome = join(tempDir, "fake-linux-home");
+    await mkdir(join(fakeLinuxHome, ".claude"), { recursive: true });
+    await runHostInit({
+      homeDirOverride: fakeLinuxHome,
+      locale: "en",
+      platformOverride: "linux",
+      preferNpx: true,
+    });
+    const linuxClaudeJson = JSON.parse(await readFile(join(fakeLinuxHome, ".claude.json"), "utf8"));
+    expect(linuxClaudeJson.mcpServers.vetoboard.command).toBe("npx");
+  });
+
+  it("6. Reasoning Model BYOK Guard: omits `temperature` for OpenAI o3/gpt-5 & DeepSeek R1 while keeping `temperature: 0.2` for standard chat models", async () => {
+    const seenBodies: Array<Record<string, unknown>> = [];
+    const strictReasoningServer = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const ch of req) chunks.push(ch as Buffer);
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      seenBodies.push(body);
+      const modelStr = String(body.model ?? "");
+      if (
+        (modelStr.includes("o3") || modelStr.includes("gpt-5") || modelStr.includes("reasoner")) &&
+        "temperature" in body
+      ) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Unsupported value: temperature" } }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: `OK:${modelStr}` } }],
+          model: modelStr,
+        }),
+      );
+    });
+
+    await new Promise<void>((r) => strictReasoningServer.listen(0, "127.0.0.1", r));
+    const port = (strictReasoningServer.address() as AddressInfo).port;
+    const baseUrl = `http://127.0.0.1:${port}/v1`;
+
+    try {
+      for (const reasoningModel of ["o3-mini", "gpt-5", "deepseek/deepseek-reasoner"]) {
+        const res = await runExternalChatCompletion({
+          config: { apiBaseUrl: baseUrl, apiKey: "sk-test", mode: "byok", modelId: reasoningModel },
+          systemPrompt: "sys",
+          userPrompt: "usr",
+        });
+        expect(res.ok).toBe(true);
+      }
+
+      const stdRes = await runExternalChatCompletion({
+        config: { apiBaseUrl: baseUrl, apiKey: "sk-test", mode: "byok", modelId: "deepseek-chat" },
+        systemPrompt: "sys",
+        userPrompt: "usr",
+      });
+      expect(stdRes.ok).toBe(true);
+      expect(seenBodies.at(-1)?.temperature).toBe(0.2);
+    } finally {
+      await new Promise<void>((r) => strictReasoningServer.close(() => r()));
+    }
   });
 });

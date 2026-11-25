@@ -28,6 +28,7 @@ export type NativeSkillSource =
   | "codex"
   | "hermes"
   | "cursor"
+  | "opencode"
   | "vetoboard-pack"
   | "host-injected";
 
@@ -215,7 +216,7 @@ export async function discoverNativeSkills(
   // 1b. Distilled reusable skills in VetoBoard's own library (`~/.vetoboard-mcp/library/skills/<id>/SKILL.md`)
   await scanFlatSkillSubdirs(join(dataRoot, "library", "skills"), "vetoboard-library", discovered);
 
-  // 2. Workspace-scoped skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.hermes/skills`, `.cursor/skills`)
+  // 2. Workspace-scoped skills (`.agents/skills`, `.agent/skills`, `.claude/skills`, `.hermes/skills`, `.cursor/skills`, `.opencode/skills`)
   const ws = options?.workspaceDir?.trim() || process.cwd();
   if (ws) {
     const resolvedWs = resolve(ws);
@@ -224,6 +225,7 @@ export async function discoverNativeSkills(
     await scanFlatSkillSubdirs(join(resolvedWs, ".claude", "skills"), "workspace", discovered);
     await scanFlatSkillSubdirs(join(resolvedWs, ".hermes", "skills"), "workspace", discovered);
     await scanFlatSkillSubdirs(join(resolvedWs, ".cursor", "skills"), "workspace", discovered);
+    await scanFlatSkillSubdirs(join(resolvedWs, ".opencode", "skills"), "workspace", discovered);
   }
 
   // 3. Extra custom skill directories
@@ -231,13 +233,14 @@ export async function discoverNativeSkills(
     await scanFlatSkillSubdirs(resolve(extra), "workspace", discovered);
   }
 
-  // 4. User & Plugin skills across Antigravity, Claude Code, Codex, Hermes Agent & Cursor
+  // 4. User & Plugin skills across Antigravity, Claude Code, Codex, Hermes Agent, Cursor & OpenCode (T3 Code)
   await scanFlatSkillSubdirs(join(home, ".gemini", "config", "skills"), "antigravity-user", discovered);
   await scanAntigravityPluginSkills(join(home, ".gemini", "config", "plugins"), discovered);
   await scanFlatSkillSubdirs(join(home, ".claude", "skills"), "claude-code", discovered);
   await scanFlatSkillSubdirs(join(home, ".codex", "skills"), "codex", discovered);
   await scanFlatSkillSubdirs(join(home, ".hermes", "skills"), "hermes", discovered);
   await scanFlatSkillSubdirs(join(home, ".cursor", "skills"), "cursor", discovered);
+  await scanFlatSkillSubdirs(join(home, ".config", "opencode", "skills"), "opencode", discovered);
 
   // 5. VetoBoard built-in & user `.vetoboard-pack.json` governance skills
   const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -304,7 +307,8 @@ export function scoreSkillForGoal(skill: DiscoveredSkill, goal: string): number 
       skill.source === "claude-code" ||
       skill.source === "codex" ||
       skill.source === "hermes" ||
-      skill.source === "cursor")
+      skill.source === "cursor" ||
+      skill.source === "opencode")
   ) {
     score += 4;
   }

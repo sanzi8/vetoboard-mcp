@@ -58,6 +58,8 @@ async function main(): Promise<void> {
       "cursor",
       "codex",
       "hermes",
+      "opencode",
+      "t3code",
       "workspace",
     ]);
     const targetsRaw = parseFlag(args, "--targets") ?? parseFlag(args, "--target");

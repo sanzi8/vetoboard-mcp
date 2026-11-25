@@ -309,7 +309,7 @@ export async function distillStandardizedSkill(
     skillFilePath = join(skillDir, "SKILL.md");
     await writeFile(skillFilePath, skillMarkdown, "utf8");
 
-    // Optional sync into native Host IDE global skill directories (`~/.gemini/config/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.hermes/skills`, `~/.cursor/skills`)
+    // Optional sync into native Host IDE global skill directories (`~/.gemini/config/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.hermes/skills`, `~/.cursor/skills`, `~/.config/opencode/skills`)
     if (input.syncToHostIde && scope === "user") {
       const hostBase = input.hostIdeRootOverride ? resolve(input.hostIdeRootOverride) : home;
       const candidateIdeRoots = [
@@ -318,6 +318,7 @@ export async function distillStandardizedSkill(
         join(hostBase, ".codex"),
         join(hostBase, ".hermes"),
         join(hostBase, ".cursor"),
+        join(hostBase, ".config", "opencode"),
       ];
       for (const ideRoot of candidateIdeRoots) {
         if (await dirExists(ideRoot)) {

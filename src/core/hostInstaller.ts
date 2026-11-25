@@ -22,6 +22,8 @@ export type HostInstallTarget =
   | "cursor"
   | "codex"
   | "hermes"
+  | "opencode"
+  | "t3code"
   | "workspace";
 
 export interface RunHostInitOptions {
@@ -31,6 +33,7 @@ export interface RunHostInitOptions {
   readonly targets?: readonly HostInstallTarget[];
   readonly preferNpx?: boolean;
   readonly preferLocalBin?: boolean;
+  readonly platformOverride?: NodeJS.Platform;
 }
 
 export interface InstalledHostSummary {
@@ -165,10 +168,49 @@ async function mergeJsonMcpServerConfig(
   await writeFile(jsonFilePath, `${JSON.stringify(rootObj, null, 2)}\n`, "utf8");
 }
 
+async function mergeOpenCodeMcpConfig(
+  jsonFilePath: string,
+  serverKey: string,
+  commandArray: readonly string[],
+): Promise<void> {
+  let rootObj: Record<string, unknown> = {};
+  try {
+    const raw = await readFile(jsonFilePath, "utf8");
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      rootObj = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // File absent or empty -> initialize fresh OpenCode config
+  }
+
+  if (!rootObj.$schema) {
+    rootObj.$schema = "https://opencode.ai/config.json";
+  }
+
+  const existingMcp =
+    rootObj.mcp && typeof rootObj.mcp === "object" && !Array.isArray(rootObj.mcp)
+      ? (rootObj.mcp as Record<string, unknown>)
+      : {};
+
+  rootObj.mcp = {
+    ...existingMcp,
+    [serverKey]: {
+      command: [...commandArray],
+      enabled: true,
+      type: "local",
+    },
+  };
+
+  await mkdir(dirname(jsonFilePath), { recursive: true });
+  await writeFile(jsonFilePath, `${JSON.stringify(rootObj, null, 2)}\n`, "utf8");
+}
+
 export async function runHostInit(options: RunHostInitOptions): Promise<RunHostInitResult> {
   const zh = options.locale === "zh";
   const home = options.homeDirOverride ? resolve(options.homeDirOverride) : homedir();
   const ws = options.workspaceDir ? resolve(options.workspaceDir) : process.cwd();
+  const effectivePlatform = options.platformOverride ?? process.platform;
 
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const installRoot = resolve(moduleDir, "..", "..");
@@ -178,9 +220,12 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
   const useLocalNode =
     options.preferLocalBin === true || (isGitSourceClone && options.preferNpx !== true);
   const commandMode: "npx" | "local-node" = useLocalNode ? "local-node" : "npx";
+  // Windows `npx` resolves to `npx.cmd` and requires `cmd /c npx` for direct child_process.spawn in Claude Code / Codex / Cursor!
   const mcpEntry = useLocalNode
     ? { args: [cliEntryPath, "--lang", "auto"], command: "node" }
-    : { args: ["-y", "vetoboard-mcp@latest", "--lang", "auto"], command: "npx" };
+    : effectivePlatform === "win32"
+      ? { args: ["/c", "npx", "-y", "vetoboard-mcp@latest", "--lang", "auto"], command: "cmd" }
+      : { args: ["-y", "vetoboard-mcp@latest", "--lang", "auto"], command: "npx" };
 
   const selectedTargets = new Set<HostInstallTarget>(options.targets ?? []);
   if (selectedTargets.size === 0) {
@@ -202,9 +247,24 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     if (await pathExists(join(home, ".hermes"))) {
       selectedTargets.add("hermes");
     }
+    if (await pathExists(join(home, ".config", "opencode"))) {
+      selectedTargets.add("opencode");
+    }
+    if (await pathExists(join(home, ".t3code"))) {
+      selectedTargets.add("t3code");
+    }
     if (selectedTargets.size === 0) {
       selectedTargets.add("workspace");
     }
+  }
+
+  // `t3code` is a multi-harness control plane over Claude Code, Codex, Cursor & OpenCode:
+  // ensure OpenCode + any existing T3 harnesses are configured seamlessly when `t3code` is selected!
+  if (selectedTargets.has("t3code")) {
+    selectedTargets.add("opencode");
+    if (await pathExists(join(home, ".claude"))) selectedTargets.add("claude");
+    if (await pathExists(join(home, ".codex"))) selectedTargets.add("codex");
+    if (await pathExists(join(home, ".cursor"))) selectedTargets.add("cursor");
   }
 
   const installed: InstalledHostSummary[] = [];
@@ -377,7 +437,42 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     });
   }
 
-  // 6. Workspace-Local Bundle (`.mcp.json` + `.agents/skills/vetoboard/SKILL.md` + `.agents/rules/vetoboard.md`)
+  // 6. OpenCode & T3 Code Harness (`~/.config/opencode/opencode.json` + `~/.config/opencode/skills/vetoboard/SKILL.md`)
+  if (selectedTargets.has("opencode")) {
+    const opencodeJsonPath = join(home, ".config", "opencode", "opencode.json");
+    const opencodeSkillPath = join(home, ".config", "opencode", "skills", "vetoboard", "SKILL.md");
+
+    await mergeOpenCodeMcpConfig(opencodeJsonPath, "vetoboard", [
+      mcpEntry.command,
+      ...mcpEntry.args,
+    ]);
+    await mkdir(dirname(opencodeSkillPath), { recursive: true });
+    await writeFile(opencodeSkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+
+    installed.push({
+      filesWritten: [opencodeJsonPath, opencodeSkillPath],
+      note: zh
+        ? "已自动写入 OpenCode / T3 Code 专属 `opencode.json`（`mcp` 数组格式）与 `vetoboard` 技能包！"
+        : "Configured OpenCode / T3 Code `opencode.json` (`mcp` array schema) and `vetoboard` skill!",
+      target: "opencode",
+    });
+  }
+
+  if (selectedTargets.has("t3code")) {
+    const t3SkillPath = join(home, ".t3code", "skills", "vetoboard", "SKILL.md");
+    await mkdir(dirname(t3SkillPath), { recursive: true });
+    await writeFile(t3SkillPath, buildCrossPlatformSkillMarkdown("vetoboard"), "utf8");
+
+    installed.push({
+      filesWritten: [t3SkillPath],
+      note: zh
+        ? "已就绪 T3 Code 多 Harness（Claude Code / Codex / Cursor / OpenCode）跨模型混编与技能包！"
+        : "Configured T3 Code multi-harness (Claude Code / Codex / Cursor / OpenCode) skill bundle!",
+      target: "t3code",
+    });
+  }
+
+  // 7. Workspace-Local Bundle (`.mcp.json` + `.agents/skills/vetoboard/SKILL.md` + `.agents/rules/vetoboard.md`)
   if (selectedTargets.has("workspace")) {
     const wsMcpPath = join(ws, ".mcp.json");
     const wsSkillPath = join(ws, ".agents", "skills", "vetoboard", "SKILL.md");

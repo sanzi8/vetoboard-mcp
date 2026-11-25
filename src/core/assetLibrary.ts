@@ -259,6 +259,7 @@ export async function retrieveReusableAssets(params: {
   await scanMarkdownAgentsDir(join(home, ".claude", "agents"), "ide-agent", roleMap);
   await scanMarkdownAgentsDir(join(home, ".hermes", "agents"), "ide-agent", roleMap);
   await scanMarkdownAgentsDir(join(home, ".codex", "agents"), "ide-agent", roleMap);
+  await scanMarkdownAgentsDir(join(home, ".config", "opencode", "agents"), "ide-agent", roleMap);
   await scanPackRoles(join(dataRoot, "packs"), roleMap);
 
   for (const builtin of BUILTIN_ROLE_TEMPLATES) {
@@ -616,8 +617,6 @@ export function renderConversationalPreflightBriefing(params: {
     return [
       "### 🛠️ VetoBoard 战前检索与推荐阵容准备单",
       "",
-      "> ⚡ **极速开跑**：认可下方推荐直接回 **「开跑」**，或按最底部示例直接对话换模型 / 调权重 / 加角色。",
-      "",
       "| 拟上场席位 | 资产来源 | 自动挂载技能 | 推荐运行模型（可改） | 推荐定位 & 权重分 | 为什么推荐这个分数？（定权依据） |",
       "| :--- | :--- | :--- | :--- | :--- | :--- |",
       ...rows,
@@ -637,14 +636,12 @@ export function renderConversationalPreflightBriefing(params: {
       "",
       "> 💬 **请确认或直接对话选模型 / 调权重**：",
       "> - 认可上述推荐与模型搭配：直接回复 **「开跑」**（或 **「只留前 2 个角色开跑」**）；",
-      "> - **想自由换模型 / 改分数 / 加自定义或技能角色**：直接用自然语言说即可（例如：**「精算用 Claude Opus，市场用 Gemini 4 Carbon，督察用 GPT-OSS 120B，工程降到 55 分，再加一个财务人效 ROI 专员，开跑」** 或 **「精算用 opus，工程用 haiku」**）。",
+      "> - **自由换模型 / 改分数 / 临时加人**：直接用自然语言说即可（例如：**「精算用 Opus，督察用 Carbon，工程降到 55 分，再加一个财务与人效 ROI 专员，开跑」** 或 **「精算用 opus，工程用 haiku」**）。",
     ].join("\n");
   }
 
   return [
     "### 🛠️ VetoBoard Pre-Flight Library Retrieval & Recommended Lineup",
-    "",
-    "> ⚡ **Quick Start**: Reply **\"Go\"** to accept the lineup below, or customize models/weights/roles in plain language.",
     "",
     "| Proposed Seat | Asset Origin | Mounted Skills | Recommended Model (Editable) | Tier & Score | Why This Score? |",
     "| :--- | :--- | :--- | :--- | :--- | :--- |",

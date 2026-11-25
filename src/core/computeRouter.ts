@@ -88,6 +88,13 @@ export async function runExternalChatCompletion(params: {
     ? endpointBase.replace(/\/+$/, "")
     : `${endpointBase.replace(/\/+$/, "")}/chat/completions`;
 
+  const resolvedModelId = config.modelId ?? "deepseek-chat";
+  const baseModelSlug = (resolvedModelId.split("/").pop() ?? resolvedModelId).toLowerCase();
+  const isReasoningModel =
+    /^(?:o1|o3|o4|gpt-5)(?:$|[-_])/i.test(baseModelSlug) ||
+    baseModelSlug.includes("reasoner") ||
+    baseModelSlug.includes("thinking");
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs ?? 60_000);
   try {
@@ -97,8 +104,8 @@ export async function runExternalChatCompletion(params: {
           { content: params.systemPrompt, role: "system" },
           { content: params.userPrompt, role: "user" },
         ],
-        model: config.modelId ?? "deepseek-chat",
-        temperature: 0.2,
+        model: resolvedModelId,
+        ...(isReasoningModel ? {} : { temperature: 0.2 }),
       }),
       headers: {
         Authorization: `Bearer ${token}`,
@@ -167,7 +174,7 @@ export function buildHostSubscriptionPlaybook(params: {
           "   - **联网要求**：严禁使用无网络权限的只读沙箱（如反重力 `TypeName: \"research\"` 默认无网！必须用 `TypeName: \"self\"` 或 `swarm` 指定模型 Worker；Claude Code 用带 `WebSearch` 的 `Task`；Hermes Agent 用 `delegate_task`；Codex / T3 Code 用带网代理）。",
           "   - **单代理客户端自动降级（Cursor 单窗 / 未开子代理的 Hermes·DeepSeek 会话）**：若当前宿主环境未开启多子代理并发工具，允许当前主模型按下方轨道顺序**分席位独立视角串行执行**（每席仍必须遵守配额内联网检索、`vetoboard_calc` 算账与白板门禁）！",
           "   - **MCP 网关分工（关键！）**：若使用 **`invoke_subagent(TypeName=\"self\")`**，子代理自带 `call_mcp_tool`，可直接调 `vetoboard_calc` 与 `vetoboard_submit_track_output`；**但若使用反重力 `swarm` 指定跨厂商模型 Worker（或任何不暴露 `call_mcp_tool` 的受限子代理），只有主控 `@coordinator` 拥有 `call_mcp_tool`！此时严禁要求 Worker 自己调 `call_mcp_tool`（否则会报 `blocked_on_mcp`）**：请明确告知各 Worker：*「无需寻找 `call_mcp_tool`！`board_post`/`board_review` 直接在看板 `@coordinator [done]` 贴出摘要、真实 `https://` URL 与 `variables` JSON 由 `@coordinator` 代交；`deliverable` 阶段用 `write_file` 将完整 Markdown 写入 `<workspaceDir>/.vetoboard-tmp/" + task.taskId + "/<trackId>.md`（算账可调命令行 `npx vetoboard-mcp calc` 或贴公式 JSON 块），看板仅发文件路径，由 `@coordinator` 调 `vetoboard_calc` + `vetoboard_submit_track_output({ markdownFilePath })` 零拷贝秒交！」*",
-          "1. **步骤 1 · 并发联网摸底贴白板（100% 并发，`stage: \"board_post\"`）**：并发启动全部专员（保存 `conversationId`！），**上白板前必须先在配额上限内（≤5~8 次查询，连续 2 次无果立刻标 `[ASSUMPTION]` 止损防死循环！）执行 `search_web`/`WebSearch` 抓取真实在售低/中/高具体型号现价、现行法规或最新 SDK 文档（附至少 1 条真实 `https://` URL 并将 `" + `search_web` + "` 记入 `invokedTools`）**，再提交 **核心摘要（≤200字）+ 结构化公开变量 `variables`** 至 `vetoboard_submit_track_output`（`stage: \"board_post\"`）。未联网无 URL 将被代码硬门禁直接打回！",
+          "1. **步骤 1 · 并发联网摸底贴白板（100% 并发，`stage: \"board_post\"`）**：并发启动全部专员（保存 `conversationId`！），**上白板前必须先在配额上限内（≤5–8 次查询，连续 2 次无果立刻标 `[ASSUMPTION]` 止损防死循环！）执行 `search_web`/`WebSearch` 抓取真实在售低/中/高具体型号现价、现行法规或最新 SDK 文档（附至少 1 条真实 `https://` URL 并将 `" + `search_web` + "` 记入 `invokedTools`）**，再提交 **核心摘要（≤200字）+ 结构化公开变量 `variables`** 至 `vetoboard_submit_track_output`（`stage: \"board_post\"`）。未联网无 URL 将被代码硬门禁直接打回！",
           `2. **步骤 2 · 全员阅板留痕 & ELECTRE+QMV 数学裁决（\`stage: "board_review"\`）**：将工具返回的《公开白板看板》通过 \`send_message\` 发给同一批专员核对留痕：无关/有利/补充填 \`decision: "approve"\`（0 争吵）；自兼容填 \`"conditional"\`；意见相反填 \`"oppose"\` 并声明冲突对象 \`targetTrackIds\` 与卡点缺失维度 \`neededDimensions\`（如 \`["market", "cost"]\`）。满足 \`D ≥ ${domPct}% & C ≥ 66.7%\` 时自动带《少数派风险备忘》直接放行；僵持时仅精准唤醒对应维度角色协商（超 2 轮或票型零变化自动早停转交用户人工拍板）！`,
           "3. **步骤 3 · 并发收口定稿（100% 并发，`stage: \"deliverable\"`）**：白板锁定后，通过 `send_message` 同时唤醒全部专员对齐白板变量并发提交完整底稿/代码方案（涉及算账必调 `vetoboard_calc` 传 `taskId`）。",
           "4. **步骤 4 · 质量检查 `[V1]` & 决策统帅全角标报告落盘 + 存知识库退场**：运行 `quality-inspector` 执行 `vetoboard_calc (mode='reconcile', taskId=...)` 并提交带 `≥10` 处 `[[Sx·§y]](#ref-sx-secy)` 角标的 `executiveBriefingMarkdown`。系统落盘三件套、存入实战知识库后，**立即干净退出 VetoBoard 模式回到普通对话**！",

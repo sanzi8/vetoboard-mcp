@@ -59,7 +59,7 @@ export const BUILTIN_ROLE_TEMPLATES: readonly RoleTemplate[] = [
     roleId: "market-analyst",
     systemCharter: {
       en: "You are the [Primary Lead · Weight 95/100] Market & Replacement-Ceiling Strategist. 1) Run live `search_web`/`WebSearch` FIRST (within your 20/60/20 search quota!) to anchor >=3 concrete in-market brand/model SKUs or named competitors across Low (`P_low`), Mid (`P_mid`), and High (`P_high`) tiers with exact prices and `https://` URLs — NEVER rely on vague single-average guesses! 2) Anchor real buyer budgets, payment line-items, transition-stage income/fee realities, and replacement-cost ceilings (`35%-40% * P_new`). 3) Reverse-calculate required active accounts (`annual_orders / orders_per_customer`) to verify channel feasibility. 4) Tag every core claim with `[VERIFIED]`, `[MODEL-DERIVED]`, `[CONDITIONAL]`, or `[ASSUMPTION]`.",
-      zh: "你是【核心主导 · 权重 95/100】多路线市场与重置天花板专员。取证与颗粒度四条铁律：1) **必先联网抓取三档真实具体型号锚点（严禁笼统平均值）**：必须先调用 `search_web`/`WebSearch`（严守配额上限）检索至少 **3 款真实在售品牌具体型号或标杆竞品（低端 `P_low` / 中端 `P_mid` / 高端 `P_high`）的真实成交价与 `https://` 链接**（涉及副业/骑手/渠道过渡时同步核实当地真实日单价与刚性损耗），严禁拍脑袋编一个『5000~30000元、均价2800元』模糊区间！2) **重置成本天花板与付款原语**：锚定真实买单方、报销/结算发票科目与同款新机价 `35%~40%` 封顶线；3) **获客漏斗倒推客户基数**：按单客年均复购/报修频次（如 `2~4单/户·年`）倒推支撑 BEP 所需的真实签约客户/课题组总数，检验零散获客是否跑得通；4) **四级结论标识（必填）**：每条核心定论显式标注【已验证】、【模型推算】、【条件性建议】或【待确认】。",
+      zh: "你是【核心主导 · 权重 95/100】多路线市场与重置天花板专员。取证与颗粒度四条铁律：1) **必先联网抓取三档真实具体型号锚点（严禁笼统平均值）**：必须先调用 `search_web`/`WebSearch`（严守配额上限）检索至少 **3 款真实在售品牌具体型号或标杆竞品（低端 `P_low` / 中端 `P_mid` / 高端 `P_high`）的真实成交价与 `https://` 链接**（涉及副业/骑手/渠道过渡时同步核实当地真实日单价与刚性损耗），严禁拍脑袋编一个『5000–30000元、均价2800元』模糊区间！2) **重置成本天花板与付款原语**：锚定真实买单方、报销/结算发票科目与同款新机价 `35%–40%` 封顶线；3) **获客漏斗倒推客户基数**：按单客年均复购/报修频次（如 `2–4单/户·年`）倒推支撑 BEP 所需的真实签约客户/课题组总数，检验零散获客是否跑得通；4) **四级结论标识（必填）**：每条核心定论显式标注【已验证】、【模型推算】、【条件性建议】或【待确认】。",
     },
     weight: 95,
   },
@@ -1225,7 +1225,7 @@ export function buildLineupSelectorPlan(params: {
         ...topSkillSpawnOptions,
       ],
       question: zh
-        ? "1/4 【上场角色选择（多选：勾谁谁上场，不勾则不上，互不冲突）】省流建议勾 2~3 项（独立督察官会自动殿后核账）："
+        ? "1/4 【上场角色选择（多选：勾谁谁上场，不勾则不上，互不冲突）】省流建议勾 2–3 项（独立督察官会自动殿后核账）："
         : "1/4 [Active Roles (Multi-select: check ONLY who participates)] Pick 2-3 tracks for lean quota:",
       questionId: "q_active_roles",
       selectionMode: "multiple",
@@ -1239,7 +1239,7 @@ export function buildLineupSelectorPlan(params: {
         optionId: r.roleId,
       })),
       question: zh
-        ? "2/4 【核心主导（建议选 1~2 项）】当各角色意见打架时，最终以谁为主裁？（选 1 个=单核拍板，选多个=联席主裁）"
+        ? "2/4 【核心主导（建议选 1–2 项）】当各角色意见打架时，最终以谁为主裁？（选 1 个=单核拍板，选多个=联席主裁）"
         : "2/4 [Primary Lead] Who holds decisive authority when specialists disagree?",
       questionId: "q_primary_leads",
       selectionMode: "multiple",
@@ -1390,7 +1390,7 @@ export function renderRoleCharterPrompt(
           : dict.tierSupport;
 
   const memorialRule = zh
-    ? "- **呈批摘要卡规范（零额外请求瘦身）**：请在正文主标题下方顺手输出 4~6 行 `### 呈批摘要卡`（核心定论与底数、硬红线/排除项、上下游口径如是否含税运包装）。"
+    ? "- **呈批摘要卡规范（零额外请求瘦身）**：请在正文主标题下方顺手输出 4–6 行 `### 呈批摘要卡`（核心定论与底数、硬红线/排除项、上下游口径如是否含税运包装）。"
     : "- **Structured Memorial Card Rule (0-extra-turn compression)**: Right below your main title, include a 4-6 bullet `### Executive Memorial` summarizing key numeric baselines, hard redlines, and accounting boundaries (e.g. whether BOM includes packaging/shipping).";
 
   const effortTier = classifyRoleEffortTier({
