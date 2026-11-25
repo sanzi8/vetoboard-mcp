@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <b>Eliminate single-model sycophancy, multi-agent mesh brawls, and mental-math hallucinations inside your AI coding IDE.</b><br/>
-  Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Dominance Voting, 16 Bilingual Specialist Roles, 27 Pure-Text Governance Skills &amp; Zero-Hallucination Math Reconciliation (`vetoboard_calc`).
+  <b>Reduce single-model sycophancy, multi-agent mesh brawls, and mental-math hallucinations inside your AI coding IDE.</b><br/>
+  Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Dominance Voting, 16 Bilingual Specialist Roles, 27 Pure-Text Governance Skills &amp; Deterministic Math Reconciliation (`vetoboard_calc`).
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 > [!TIP]
 > **Design Philosophy & Smart Model Sizing (Read First)**:
-> - **Trading Time & Structured Tokens for High-Reliability Accuracy**: VetoBoard replaces single-shot sycophancy and mental-math hallucinations with concurrent live web grounding, shared whiteboard cross-examination, `ELECTRE/QMV` mathematical dominance voting, and `vetoboard_calc` 0.5%-tolerance arithmetic verification.
+> - **Trading Time & Structured Tokens for High-Reliability Accuracy**: Through concurrent live web grounding, shared whiteboard cross-examination, `ELECTRE/QMV` mathematical dominance voting, and `vetoboard_calc` 0.5%-tolerance arithmetic verification, VetoBoard trades execution time and multi-round tokens to reduce single-model sycophancy and mental-math hallucinations for higher-reliability decisions.
 > - **Running Frontier Models on Every Seat Is Pure Waste — Use `Flash` Tiers!**: Because structural cross-checking and deterministic math gates handle error correction, **stacking expensive flagship models (e.g., all-Opus / all-GPT-5) across every specialist role wastes both quota and latency**. We strongly recommend fast, cost-effective models such as **`Gemini Flash`**, **`DeepSeek-V3`**, or **`Claude Haiku / Sonnet`** for specialist seats (optionally pairing 1 cross-family model on the final read-only Inspector), saving **70%–85%** of tokens with zero loss in audit rigor.
 
 ---

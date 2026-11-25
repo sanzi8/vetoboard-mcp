@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <b>终结单模型对话中的「顺从迎合」、「多智能体拉群混战」与「心算幻觉」——将动态共享白板、ELECTRE/QMV 运筹学数学裁决、16 大专业角色、27 个治理技能包与 0.5% 容差独立核账器一键接入你的 AI 编程工具。</b><br/>
-  Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Dominance Voting, Non-Compensatory Hard Veto &amp; Zero-Hallucination Math Auditing MCP Server.
+  <b>降低单模型对话中的「顺从迎合」、「多智能体拉群混战」与「心算幻觉」——将动态共享白板、ELECTRE/QMV 运筹学数学裁决、16 大专业角色、27 个治理技能包与 0.5% 容差独立核账器一键接入你的 AI 编程工具。</b><br/>
+  Dynamic Shared Whiteboard, ELECTRE/QMV Mathematical Dominance Voting, Non-Compensatory Hard Veto &amp; Deterministic Math Auditing MCP Server.
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 > [!TIP]
 > **核心机制与模型省配铁律（必看）**：
-> - **用时间与结构化 Token 换取推理准确性**：VetoBoard 的本质是通过「多角色并发联网取证 + 共享白板交叉质询 + `ELECTRE/QMV` 数学支配裁决 + `vetoboard_calc` 0.5% 容差独立复算」，以一定的执行时间与多轮 Token 消耗为代价，减少单模型顺从迎合与心算幻觉，换取高可靠决策结论。
+> - **用时间与结构化 Token 换取推理准确性**：VetoBoard 的本质是通过「多角色并发联网取证 + 共享白板交叉质询 + `ELECTRE/QMV` 数学支配裁决 + `vetoboard_calc` 0.5% 容差独立复算」，以一定的执行时间与多轮 Token 消耗为代价，降低单模型顺从迎合与心算幻觉，换取高可靠决策结论。
 > - **全员上顶级旗舰模型纯属浪费！强烈推荐 `Flash` 等轻量模型**：架构自带白板互审与确定性代码算账兜底，**给所有专员席位堆砌昂贵的旗舰模型（如全员 Claude Opus / GPT-5）纯属浪费额度与时间**。日常主力席位强烈优先选用 **`Gemini Flash`**、**`DeepSeek-V3`**、**`Claude Haiku / Sonnet`** 等高速高性价比模型（最多仅给殿后的「独立铁面督察官」配一个异构推理模型把关），即可省下 **70%–85%** 额度且核账精度丝毫不减！
 
 ---
