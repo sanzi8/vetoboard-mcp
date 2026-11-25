@@ -1,0 +1,24 @@
+name: "✨ 功能建议或社区角色/技能投递 / Feature or Asset Contribution"
+description: "提出新特性建议，或通过方法 A 投递脱敏后的专业角色与技能包 / Propose features or contribute sanitized roles & skills"
+title: "[Feature / Asset]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: "类型 / Category"
+      options:
+        - "✨ 新功能建议 (Feature Request)"
+        - "🏛️ 专业角色投递 (Reusable Role Contribution)"
+        - "🧰 治理技能投递 (SKILL.md Contribution)"
+        - "📦 行业委员会模板包 (.vetoboard-pack.json)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: "详细说明或脱敏资产内容 / Description or Sanitized Payload"
+      description: "若为方法 A 资产共享，直接粘贴 `vetoboard_contribute_asset` 生成的脱敏 JSON/Markdown 即可（支持凭回执号随时申请撤回）"
+    validations:
+      required: true

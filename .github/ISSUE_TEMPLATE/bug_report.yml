@@ -1,0 +1,50 @@
+name: "🐛 Bug 反馈 / Bug Report"
+description: "反馈安装、MCP 握手、跨厂商 Schema 或审理流程中的异常问题 / Report a bug or compatibility issue"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: host_client
+    attributes:
+      label: "使用的客户端 / Host Coding Agent"
+      options:
+        - Antigravity
+        - Claude Code
+        - Cursor
+        - OpenAI Codex CLI
+        - Nous Hermes Agent (+ DeepSeek)
+        - T3 Code / OpenCode
+        - Remote HTTP MCP (serve)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: "操作系统 / Operating System"
+      options:
+        - Windows
+        - macOS
+        - Linux / WSL
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "VetoBoard 版本与模型 / Version & Model"
+      placeholder: "例如 v1.4.0 · Gemini Flash / Claude Sonnet / DeepSeek-V3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "复现步骤与报错日志 / Steps to Reproduce & Error Logs"
+      description: "请粘贴具体的报错信息或截图（注意抹去你自己的 API Key 或私人路径）"
+      placeholder: |
+        1. 执行命令 / 输入提示词：...
+        2. 实际报错输出：...
+    validations:
+      required: true
