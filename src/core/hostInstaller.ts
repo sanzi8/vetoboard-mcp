@@ -611,11 +611,18 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     const targetSkipped: SkippedCorruptConfigNotice[] = [];
 
     const pluginJsonPath = join(plugRoot, "plugin.json");
+    const pluginReadmePath = join(plugRoot, "README.md");
     const mcpJsonPath = join(plugRoot, "mcp_config.json");
     const rulePath = join(plugRoot, "rules", "AGENTS.md");
     const skillShortPath = join(plugRoot, "skills", "vetoboard", "SKILL.md");
     const skillLegacyPath = join(plugRoot, "skills", "vetoboard-council", "SKILL.md");
     const logoPath = join(plugRoot, "assets", "logo.svg");
+    const demoSvgSrcPath = join(installRoot, "assets", "vetoboard-antigravity-demo.svg");
+    const demoSvgDstPath = join(plugRoot, "assets", "vetoboard-antigravity-demo.svg");
+    const rootReadmeSrcPath = join(
+      installRoot,
+      zh ? "README.md" : (await pathExists(join(installRoot, "README.en.md"))) ? "README.en.md" : "README.md",
+    );
 
     await mkdir(dirname(rulePath), { recursive: true });
     await mkdir(dirname(skillShortPath), { recursive: true });
@@ -623,29 +630,65 @@ export async function runHostInit(options: RunHostInitOptions): Promise<RunHostI
     await mkdir(dirname(logoPath), { recursive: true });
 
     const pluginManifest = {
-      author: "VetoBoard Contributors",
-      description:
-        "Dynamic Shared Whiteboard, ELECTRE/QMV mathematical dominance, non-compensatory Hard Veto gates, and deterministic vetoboard_calc math verification (EN/ZH).",
-      displayName: "VetoBoard Governance & Hard-Veto Whiteboard",
+      author: "sanzi8",
+      description: zh
+        ? `v${CURRENT_VETOBOARD_VERSION} · 动态共享白板 + ELECTRE/QMV 数学裁决 + Borg 权重弹性配额池（结余回流/返工缩权）+ 2 席免批动态扩编 + 16 大专业角色 + 27 个治理技能包 + vetoboard_calc 0.5% 确定性核账。`
+        : `v${CURRENT_VETOBOARD_VERSION} · Dynamic Shared Whiteboard, ELECTRE/QMV mathematical dominance, Borg Weighted Quota Pool & reflow, 2-seat dynamic peer expansion, 16 roles, 27 skills & deterministic vetoboard_calc.`,
+      displayName: `VetoBoard Governance & Hard-Veto Whiteboard (v${CURRENT_VETOBOARD_VERSION})`,
+      homepage: "https://github.com/sanzi8/vetoboard-mcp#readme",
       logo: "assets/logo.svg",
       name: "vetoboard-mcp",
+      repository: "https://github.com/sanzi8/vetoboard-mcp",
       suggestedPrompts: [
+        "/vetoboard 对拟立项的商业计划进行全维度残酷证伪、合规排雷与单位经济精算",
         "调用 vetoboard_calc 独立核验：单价 199 元、硬件成本 68 元、平台抽佣 12%、年固定成本 18 万，宣称 1200 单回本是否算错？",
-        "用 VetoBoard 评估：零本金过渡至高校科研仪器维修的创业方案是否可持续盈利？",
-        "Run a VetoBoard 7-Gate SWE council to design and audit a 10k req/s multi-tenant webhook engine",
+        "/vetoboard 全栈设计与实现多租户权限与计费对账模块（启用 Borg 配额池与 7-Gate 审查）",
       ],
       version: CURRENT_VETOBOARD_VERSION,
     };
 
     await writeFile(pluginJsonPath, `${JSON.stringify(pluginManifest, null, 2)}\n`, "utf8");
+    if (await pathExists(rootReadmeSrcPath)) {
+      await copyFile(rootReadmeSrcPath, pluginReadmePath);
+    }
+    if (await pathExists(demoSvgSrcPath)) {
+      await copyFile(demoSvgSrcPath, demoSvgDstPath);
+    }
+
+    // Antigravity automatically prefixes `<pluginDirName>_` onto keys in `<pluginRoot>/mcp_config.json`,
+    // so key `"engine"` registers as `vetoboard-mcp_engine`! Remove any stale `"vetoboard-mcp_engine"` duplicate key first.
+    const existingAgyMcp = await readTextFileStrict(mcpJsonPath);
+    if (existingAgyMcp.kind === "present") {
+      const parsedAgy = parseJsonOrJsoncObject(existingAgyMcp.raw);
+      if (
+        parsedAgy.ok &&
+        parsedAgy.value.mcpServers &&
+        typeof parsedAgy.value.mcpServers === "object" &&
+        !Array.isArray(parsedAgy.value.mcpServers) &&
+        "vetoboard-mcp_engine" in (parsedAgy.value.mcpServers as Record<string, unknown>)
+      ) {
+        const cleanedServers = { ...(parsedAgy.value.mcpServers as Record<string, unknown>) };
+        delete cleanedServers["vetoboard-mcp_engine"];
+        await writeFile(
+          mcpJsonPath,
+          `${JSON.stringify({ ...parsedAgy.value, mcpServers: cleanedServers }, null, 2)}\n`,
+          "utf8",
+        );
+      }
+    }
+
+    const agyNodeEntry =
+      useLocalNode && !options.platformOverride
+        ? { args: mcpEntry.args, command: process.execPath }
+        : mcpEntry;
     const agyMcpOut = await mergeJsonMcpServerConfig({
       backupDir,
       jsonFilePath: mcpJsonPath,
-      mcpEntry,
-      serverKey: "vetoboard-mcp_engine",
+      mcpEntry: agyNodeEntry,
+      serverKey: "engine",
       target: "antigravity",
     });
-    files.push(pluginJsonPath);
+    files.push(pluginJsonPath, pluginReadmePath);
     recordConfigOutcome("antigravity", mcpJsonPath, agyMcpOut, files, targetBackups, targetSkipped);
     await writeFile(rulePath, buildAntigravityAgentsRule(), "utf8");
     const agySkillMd = buildCrossPlatformSkillMarkdown("vetoboard-mcp_engine");
