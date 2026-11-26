@@ -1,47 +1,41 @@
 ---
 name: delivery-check
-description: 交付自检清单。改完代码、提交推送之前用它过一遍：影响面、回滚办法、异常路径的日志、有没有把凭据写进代码或日志、以及"这活到底算不算交付了"。当任务涉及改代码并要提交时使用。
+description: Pre-commit and pre-push delivery self-check checklist covering blast radius, rollback safety, failure-path observability, credential/PII hygiene, and definition-of-done verification. Use before committing code or claiming a task is delivered.
 ---
 
-# 交付自检
+# Delivery Self-Check
 
-改完了先别急着说"做好了"。下面四条**逐条回答**，答案写进你的回复里；
-答不上来的那条，就是你还没做完的那条。
+Before claiming work is "done" or pushing commits, answer all five checks below explicitly in your response. Any item you cannot answer concretely is unfinished work.
 
-## 1. 影响面
+## 1. Blast Radius
 
-这次改动还会影响哪些页面 / 接口 / 定时任务？
-- 改了公共组件、公共函数、数据库结构、接口出入参 → 把**调用方**找出来列一遍（`grep` 一下别靠记忆）。
-- 只影响你改的那一处，也明说"只影响 X"。
+What other pages, endpoints, CLI commands, or background jobs are affected by this change?
+- If you modified shared components, utility functions, database schemas, or API request/response contracts, find and list every caller via `grep` (never rely on memory).
+- If the change is strictly isolated to one module, state explicitly: "Isolated to `X` because ...".
 
-## 2. 回滚
+## 2. Rollback Plan
 
-出了问题怎么退回去？
-- 一般就是"回滚这一个提交"——那就确认你的改动**是一个自洽的提交**，没有夹带别的东西。
-- 如果还动了数据（迁移脚本、批量刷数据），**必须说明怎么退**；退不了的要在回复里明确标出来。
+How do we revert cleanly if this fails in production?
+- For pure code changes, verify the commit is atomic and self-contained (zero unrelated drive-by edits) so `git revert <sha>` restores prior behavior cleanly.
+- If schemas, migrations, or persisted state formats changed, document the exact backward-compatibility or rollback procedure — and call out anything irreversible upfront.
 
-## 3. 异常路径
+## 3. Failure-Path Observability
 
-程序走到不该走的分支时，人能不能定位问题？
-- 新增的失败分支有没有留下能查的信息（是什么请求、哪个 id、错在哪一步）。
-- 不要把整个异常吞掉只返回一个"失败"。
+When execution hits an unexpected error branch, can an operator diagnose it immediately?
+- Verify new error paths preserve actionable context (operation name, entity/request ID, failing step, and underlying cause).
+- Never swallow exceptions silently (`catch {}`) or collapse distinct failure modes into a generic `"failed"` message.
 
-## 4. 凭据与个人信息
+## 4. Credentials & PII Hygiene
 
-- 有没有把密钥、令牌、密码、内网地址写进**代码、配置、日志、测试数据**？
-- 有没有把真实姓名/手机号/邮箱当样例数据写进去？
-- 截图里有没有露出这些？（截图是会作为产出物被收走的）
+- Confirm zero API keys, tokens, passwords, private URLs, or internal IPs were written into source code, configs, logs, or test fixtures.
+- Confirm zero real user names, phone numbers, email addresses, or local machine user paths leaked into committed files or screenshots.
 
-## 5. 这活算不算交付了
+## 5. Definition of Done
 
-按以下标准判断是否交付：
+Verify what "delivered" actually means for the current task:
+- **Committed & Verified**: Uncommitted edits or unverified builds are not delivered work unless the user explicitly asked not to commit.
+- Report concrete evidence in your handoff: **branch name, commit SHA, modified files, and the exact verification commands + pass/fail output**.
 
-- **代码活**：改动**提交并 push 到自己的工作分支**才算干完；合并到基线分支交给平台或评审人，
-  **你不许自己合、不许上线**。
-- 只在工作区里改完没提交 = 这活没交付，构建通过也一样。
-- 回复里给出：**分支名、提交号、改了哪些文件、怎么验的**（命令与输出）。
+## Usage
 
-## 用法
-
-在准备提交前，把上面 1–5 逐条写进回复。格式随意，但每条都要有实际内容，
-不要写"无影响""不涉及"这种空话——真没有也说清为什么没有。
+Run through items 1–5 before finalizing your commit and include concrete answers (never placeholder phrases like "N/A" or "no impact" — state *why* there is no impact).

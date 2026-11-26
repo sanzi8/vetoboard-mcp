@@ -1,143 +1,89 @@
 ---
 name: contract-review
-description: 律师助理与法律助手、项目管理专家在审核合同、排查条款风险时必备。自动执行基础、商业、法律三层审查，仅添加批注不改原文，一键生成带批注合同、审查摘要、综合意见及业务流程图，让合同风控与业务梳理更高效专业。
-display_name: 法律咨询助手
-version: 1.0.0
-author: c3b57459-6405-4180-adea-9dcff7bb7e1c
-examples:
-  - "审查这份合同里的违约责任和管辖条款"
-  - "这份协议有没有自动续约的坑"
-
+description: Three-layer contract review and clause risk auditing (basic text accuracy, commercial terms, and legal protections). Adds structured clause-anchored comments without altering original contract text, and produces an objective contract summary, consolidated review opinion, and Mermaid business flowchart.
 ---
 
 # Contract Review Skill
 
 ## Overview
 
-This skill performs contract reviews by **adding comments only** (no edits to the original text). It follows a three-layer review (basic, business, legal) and generates:
+This skill performs contract reviews by **adding comments only** (never editing original contract text). It follows a structured three-layer review model (basic, business, legal) and produces:
 
-- Annotated contract (.docx)
-- Contract summary (.docx)
-- Consolidated review opinion (.docx)
-- Business flowchart (Mermaid + rendered image)
+- Annotated contract (`.docx` or structured clause-by-clause review report)
+- Objective contract summary
+- Consolidated review opinion for business stakeholders
+- Business process flowchart (Mermaid diagram + optional rendered image)
 
-**Language rule:** detect the contract’s dominant language and output all generated content (comments, summary, opinion, flowchart text) in that language. Use the guidance in **[references/language.md](references/language.md)**.
+**Language rule:** Detect the contract's dominant language and write all generated comments, summaries, opinions, and flowchart labels in that language (see **[references/language.md](references/language.md)** when present).
 
 ## Workflow
 
-1. Unpack the contract (.docx) for XML operations
-2. Read contract text (pandoc or XML)
-3. Execute three-layer review
-4. Add comments to the document
-5. Generate contract summary
-6. Generate consolidated opinion
-7. Generate business flowchart and render image
-8. Repack to .docx
+1. Unpack or parse the contract document (`.docx` XML, PDF, or plain text)
+2. Read the complete contract text and definitions
+3. Execute the three-layer clause audit
+4. Anchor structured review comments to exact clauses/paragraphs
+5. Generate an objective contract summary
+6. Generate a consolidated risk & negotiation opinion
+7. Generate a Mermaid business flowchart directly from contractual obligations
+8. Repack `.docx` (when operating on Word files) and verify comments
 
 ## Output Naming
 
-- Output directory: `审核结果：{ContractName}` for Chinese or `Review_Result_{ContractName}` for English
-- Reviewed contract: `{ContractName}_审核版.docx` for Chinese or `{ContractName}_Reviewed.docx` for English
-- Review report: `审核报告.txt` for Chinese or `Review_Report.txt` for English
+- Output directory: `Review_Result_{ContractName}`
+- Reviewed contract: `{ContractName}_Reviewed.docx`
+- Review report: `Review_Report.md` (or `.txt`)
 
 ## Comment Principles
 
-- **Comments only**: do not modify the original text or formatting
-- **Precise anchoring**: comment should target specific clauses/paragraphs
-- **Structured content**: each comment includes issue type, risk reason, and revision suggestion
-- **Risk level**: carried by reviewer name; do **not** include a “risk level” line in comment body
-- **Output language**: use labels in the contract’s language (see `references/language.md`)
+- **Comments only**: Never modify original contract wording or formatting
+- **Precise anchoring**: Target specific clauses, sections, and defined terms
+- **Structured content**: Every comment must state `[Issue Type]`, `[Risk Reason]`, and `[Revision Suggestion]`
+- **Risk severity**: Encode severity consistently (`High` / `Medium` / `Low`)
 
-**Comment example (English):**
-```
+**Comment example:**
+```text
 [Issue Type] Payment Terms
-[Risk Reason] The total amount is stated as USD 100,000 in Section 3.2, but the payment clause lists USD 1,000,000 in Section 5.1. This inconsistency may cause disputes.
-[Revision Suggestion] Align the total amount across clauses and clarify whether tax is included.
+[Risk Reason] The total contract value is stated as USD 100,000 in Section 3.2, whereas Section 5.1 lists milestone payments totaling USD 1,000,000. This discrepancy creates immediate payment dispute exposure.
+[Revision Suggestion] Reconcile the total amount across Sections 3.2 and 5.1 and explicitly specify whether applicable taxes are included.
 ```
 
 ## Review Standards
 
-Use the three-layer review model and the detailed checklist in **[references/checklist.md](references/checklist.md)**.
+Apply all three layers systematically (see **[references/checklist.md](references/checklist.md)** when available):
 
-### Layer 1: Basic (text quality)
-- Accuracy of numbers, dates, terms
-- Consistent numbering and references
-- Clarity and lack of ambiguity
-- Formatting and punctuation quality
+### Layer 1: Basic (Text & Cross-Reference Quality)
+- Consistency of numbers, currency figures, dates, and defined terms
+- Accurate section numbering and cross-references
+- Clarity and absence of syntactic ambiguity
 
-### Layer 2: Business terms
-- Scope, deliverables, quantity/specs
-- Pricing and payment schedule
-- Delivery/acceptance procedures
-- Rights/obligations and performance guarantees
+### Layer 2: Commercial Terms
+- Scope of work, deliverables, quantities, and specifications
+- Pricing structure, tax treatment, and payment schedule
+- Delivery, inspection, and acceptance criteria
+- Rights, obligations, SLAs, and performance guarantees
 
-### Layer 3: Legal terms
-- Effectiveness and term/termination
-- Liability/penalties and remedies
-- Dispute resolution and governing law
-- Confidentiality, force majeure, IP, notice, authorization
+### Layer 3: Legal Protections
+- Effective conditions, term, renewal traps (e.g., silent auto-renewal), and termination rights
+- Indemnification, liability caps, liquidated damages, and remedies
+- Governing law, jurisdiction, and dispute resolution venue
+- Confidentiality, force majeure, IP ownership, notices, and signatory authority
 
-**Risk levels (encoded in reviewer name):**
-- 🔴 High: core business ambiguity (price, scope, rights/obligations)
-- 🟡 Medium: material but non-core ambiguity
-- 🔵 Low: minimal practical impact
+**Severity tiers:**
+- 🔴 **High**: Core commercial or legal exposure (uncapped liability, pricing mismatch, IP transfer trap, missing termination right)
+- 🟡 **Medium**: Material ambiguity in non-core operational procedures
+- 🔵 **Low**: Minor drafting or cross-reference cleanup
 
-## Contract Summary
+## Deliverables
 
-Generate a structured, objective summary in the contract’s language.
-- See **[references/summary.md](references/summary.md)** (English template)
-- Use **[references/language.md](references/language.md)** for language selection and Chinese labels
-
-Output file: `合同概要.docx` for Chinese or `Contract_Summary.docx` for English (default font: 仿宋; adjust if language requires)
-
-## Consolidated Opinion
-
-Generate a concise, two-paragraph response for the business team in the contract’s language.
-- See **[references/opinion.md](references/opinion.md)**
-
-Output file: `综合审核意见.docx` for Chinese or `Consolidated_Opinion.docx` for English (default font: 仿宋; adjust if language requires)
-
-## Business Flowchart (Mermaid)
-
-Generate Mermaid flowchart per requirements and render to image.
-- See **[references/flowchart.md](references/flowchart.md)**
-
-Outputs:
-- `business_flowchart.mmd`
-- `business_flowchart.png`
-
-li## Technical Notes
-
-Core workflow:
-1. Unpack → 2. Add comments → 3. Summary → 4. Opinion → 5. Flowchart → 6. Repack
-
-API & implementation details:
-- **[references/technical.md](references/technical.md)**
-
-## Dependencies
-
-- Python 3.9+ (3.10+ recommended)
-- pandoc (system install)
-- defusedxml
-- Mermaid CLI (`mmdc`) for rendering
-- python-docx for rich text output
-
-## Troubleshooting (Short)
-
-- **Comments missing in Word**: run `doc.verify_comments()` and re-save
-- **find_paragraph fails**: shorten search text; confirm actual paragraph text
-- **Mermaid render fails**: ensure `mmdc` installed; use Chrome path or Puppeteer config
-
-## Examples
-
-See **[references/examples.md](references/examples.md)** for a full workflow example.
+1. **Contract Summary** (`Contract_Summary.docx` / `.md`): Strictly objective facts (parties, scope, price, term, milestones) with zero subjective risk commentary.
+2. **Consolidated Opinion** (`Consolidated_Opinion.docx` / `.md`): Concise two-paragraph executive guidance summarizing top redlines and concrete negotiation redlines.
+3. **Business Flowchart** (`business_flowchart.mmd`): Mermaid `flowchart TD` derived strictly from contractual triggers, delivery gates, payment milestones, and remedies.
 
 ## Important Rules
 
 1. Never alter original contract text
-2. Review all three layers, do not skip items
-3. Ensure risk level is accurate and consistent
-4. Keep comments precise, professional, and actionable
-5. Flowchart must come strictly from the contract text
-6. Summary is objective only; no risk analysis
-7. Opinion only reflects findings already identified
+2. Audit all three layers without skipping clauses
+3. Calibrate risk severity accurately and consistently
+4. Make every revision suggestion concrete and redline-ready
+5. Derive flowcharts strictly from written contract obligations
+6. Keep the summary purely factual and keep the opinion grounded only in verified findings

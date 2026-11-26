@@ -1,6 +1,6 @@
 ---
 name: content-research-writer
-description: 内容创作者、技术写作员在撰写博客、深度文章或技术文档时，使用此技能可开启全流程写作协作。它能帮你研究资料、构建大纲、逐段打磨并自动添加引用，快速优化Hook，让你高效产出高质量内容，告别孤军奋战！
+description: Collaborative research and writing partner for blog posts, deep-dive articles, technical documentation, and case studies. Helps structure outlines, verify sources, format citations, sharpen hooks, and deliver section-by-section feedback while preserving the author's voice.
 ---
 
 # Content Research Writer
