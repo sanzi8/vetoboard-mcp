@@ -545,6 +545,54 @@ function explainRoleScore(
       en: "Splits complex goals across direct execution, fast subagents & frontier tracks with clean OWNERS",
       zh: "评估模块耦合度与算力梯度，划分直做与子代理并发委派边界及交接验收判据",
     },
+    "macro-household-economist": {
+      en: "Queries official quantile income/wealth surveys & computes household surplus accumulation years via vetoboard_calc",
+      zh: "联网抓取权威五等份收入/CFPS家计调查，用 vetoboard_calc 精算刚性支出后净结余与资本积累年限",
+    },
+    "institutional-mobility-analyst": {
+      en: "Audits fiscal transfers, urban-rural education screening, hukou/property wealth capture & credit barriers",
+      zh: "穿透拆解教育分流与生均财政差异、户籍/不动产增值分配及正规信贷抵押门槛等结构性制度摩擦",
+    },
+    "asymmetric-risk-sociologist": {
+      en: "Models asymmetric Risk-of-Ruin (ergodicity trap), tacit information lag & catastrophic shock vulnerability",
+      zh: "量化无安全垫家庭『单次重病/踏空即负债锁死』的非对称破产率、隐性信息滞后税与人脉代差",
+    },
+    "empirical-pathway-falsifier": {
+      en: "Benchmarks cross-cohort mobility elasticity, falsifies debt-trap shortcuts & isolates real high-leverage paths",
+      zh: "横向对照跨周期代际弹性数据，残酷证伪高负债伪跃迁陷阱并提炼可算清正期望的现实杠杆",
+    },
+    "opportunity-cost-actuary": {
+      en: "Computes 5-to-10-year cumulative net cashflow, foregone income & break-even year across options via vetoboard_calc",
+      zh: "调用 vetoboard_calc 并表核算各备选路径未来 5–10 年累计净现金流、放弃收入（机会成本）与回本年份",
+    },
+    "labor-supply-demand-researcher": {
+      en: "Benchmarks live P50 median pay (never top-1% survivorship!), placement rates & 3-5 year oversupply risk",
+      zh: "联网核查最新真实 P50 中位数薪资（拒绝幸存者偏差）、录取/淘汰率及 3–5 年后扩招过剩风险",
+    },
+    "tail-risk-stress-tester": {
+      en: "Stress-tests worst-case shocks (layoff, delayed graduation, liquidity lock) and irreversible exit penalties",
+      zh: "压力测试延毕/裁员/流动性冻结等最坏黑天鹅情景下的现金流断档月数与违约不可逆代价",
+    },
+    "reversible-pilot-designer": {
+      en: "Designs a 30-to-90-day low-cost reversible validation pilot with explicit numeric go/kill triggers",
+      zh: "设计不裸辞不梭哈的 30–90 天低成本可逆试水方案与明确量化继续/止损触发线",
+    },
+    "primary-evidence-investigator": {
+      en: "Verifies primary empirical datasets, peer-reviewed studies & official disclosures via live web search",
+      zh: "联网抓取权威原始统计、学术实证与官方披露一手底数，剥离二手传言与情绪叙事",
+    },
+    "mechanism-first-principles": {
+      en: "Decomposes underlying incentive loops & physical/economic constraints separating causation from correlation",
+      zh: "从激励相容与物理/经济硬约束拆解底层因果反馈回路，严格区分相关性表象与结构根因",
+    },
+    "counter-hypothesis-devil": {
+      en: "Hunts for selection bias, omitted variables & international/historical counterexamples to falsify naive claims",
+      zh: "专门搜寻幸存者偏差、遗漏变量与跨国跨期真实反例，对预设前提发起高强度证伪挑战",
+    },
+    "boundary-action-synthesizer": {
+      en: "Defines exact threshold conditions where conclusions flip and distills testable predictions",
+      zh: "界定结论成立与反转的量化临界条件，提炼可观测验证的客观指标与行动推论",
+    },
   };
   if (roleReasonMap[roleId]) {
     return zh ? roleReasonMap[roleId]!.zh : roleReasonMap[roleId]!.en;
@@ -582,6 +630,8 @@ export function renderConversationalPreflightBriefing(params: {
     readonly boundSkills: readonly string[];
     readonly recommendedModelId?: string;
     readonly recommendedModelLabel?: string;
+    readonly charterSummary?: string;
+    readonly isTopicTailored?: boolean;
   }[];
   readonly rationale: readonly string[];
 }): string {
@@ -597,8 +647,10 @@ export function renderConversationalPreflightBriefing(params: {
   ).length;
 
   const originMap = new Map(retrieved.roles.map((r) => [r.role.roleId, r.origin]));
-  const originLabel = (roleId: string): string => {
+  const originLabel = (item: (typeof recommendedLineup)[number]): string => {
+    const { roleId } = item;
     if (roleId === "quality-inspector") return zh ? "内置殿后督察" : "Built-in Inspector";
+    if (item.isTopicTailored) return zh ? "🎯 按题定制专员" : "🎯 Topic-Tailored";
     const o = originMap.get(roleId);
     if (o === "vetoboard-library") return zh ? "📚 已沉淀复用角色库" : "📚 Saved Role Library";
     if (o === "workspace-agent" || o === "ide-agent") return zh ? "🤖 本机原生 Agent" : "🤖 Native IDE Agent";
@@ -615,15 +667,21 @@ export function renderConversationalPreflightBriefing(params: {
           : "—";
     const modelStr = item.recommendedModelLabel
       ? `\`${item.recommendedModelLabel}\``
-      : "`inherit`";
-    const reason = explainRoleScore(
+      : "`flash`";
+    const baseReason = explainRoleScore(
       item.roleId,
       item.priorityTier,
       item.weight,
       locale,
       rationale,
     );
-    return `| ${i + 1}. **${item.title}** (\`${item.roleId}\`) | ${originLabel(item.roleId)} | ${skillsStr} | ${modelStr} | **${item.tierLabel} · \`${item.weight}\` 分** | ${reason} |`;
+    const reason =
+      item.isTopicTailored &&
+      item.charterSummary &&
+      (baseReason.includes("复用自本地角色资产库") || baseReason.includes("Retrieved from reusable"))
+        ? item.charterSummary.replace(/\|/g, "／")
+        : baseReason;
+    return `| ${i + 1}. **${item.title}** (\`${item.roleId}\`) | ${originLabel(item)} | ${skillsStr} | ${modelStr} | **${item.tierLabel} · \`${item.weight}\` 分** | ${reason} |`;
   });
 
   const groupedPills =

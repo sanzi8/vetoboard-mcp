@@ -56,6 +56,7 @@ import {
   buildLineupSelectorPlan,
   CROSS_EXAMINER_ROLE_TEMPLATE,
   customRoleToTemplate,
+  DYNAMIC_TOPIC_ARCHETYPE_ROLE_IDS,
   findRoleTemplate,
   normalizeRoleModelBinding,
   parseCustomWeightText,
@@ -976,6 +977,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .describe(
             "Optional ID or display name of the model running the current host conversation (e.g. 'Gemini 4 Carbon' or 'gemini-4-carbon-high') so VetoBoard marks ★active and prioritizes it among same-family peers.",
           ),
+        customRoles: z
+          .array(customRoleInputSchema)
+          .optional()
+          .describe(
+            "Optional topic-tailored specialist roles designed for open-domain / non-standard goals (e.g. socio-economic mobility, policy, academic research, medical/scientific inquiry, or career decisions). Pass `roleIds: []` alongside `customRoles` when built-in startup/SWE roles do not fit the topic!",
+          ),
         domain: z.enum(["commercial", "swe"]).default("commercial"),
         extraSkillDirs: z.array(z.string()).optional(),
         goal: z.string().min(1),
@@ -1005,6 +1012,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .describe(
             "Verbatim JSON string returned by the host's model-discovery tool (e.g. Antigravity `swarm({ action: 'models', all: true })` or `/v1/models`) so 100% of model families & quotas are parsed and grouped automatically with zero omission.",
           ),
+        roleIds: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Optional explicit built-in `roleIds` subset (pass `[]` together with `customRoles` to build a 100% custom topic-specific council).",
+          ),
         workspaceDir: z.string().optional(),
       }),
       title: "VetoBoard Pre-Flight Role, Model & Native Skill Bench",
@@ -1025,6 +1038,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       });
       const plan = buildLineupSelectorPlan({
         activeHostModel: args.activeHostModel,
+        customRoles: args.customRoles,
         discoveredSkills: retrieved.skills,
         domain: args.domain,
         goal: args.goal,
@@ -1032,6 +1046,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         hostPlatform: args.hostPlatform,
         locale,
         rawHostModelsJson: args.rawHostModelsJson,
+        roleIds: args.roleIds,
       });
       const briefingMarkdown = renderConversationalPreflightBriefing({
         activeHostModel: args.activeHostModel,
@@ -1337,9 +1352,13 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           Object.keys(mergedWeightOverrides).length > 0 ? mergedWeightOverrides : undefined,
       });
 
-      // Automatically persist any newly hatched skill-roles or custom roles into `~/.vetoboard-mcp/library/roles/` for future reuse!
+      // Automatically persist any newly hatched skill-roles or user custom roles into `~/.vetoboard-mcp/library/roles/` for future reuse!
       for (const r of lineup.roles) {
-        if (r.kind !== "inspector" && !findRoleTemplate(r.roleId)) {
+        if (
+          r.kind !== "inspector" &&
+          !findRoleTemplate(r.roleId) &&
+          !DYNAMIC_TOPIC_ARCHETYPE_ROLE_IDS.has(r.roleId)
+        ) {
           await persistRoleToLibrary(
             store.rootDir,
             r,

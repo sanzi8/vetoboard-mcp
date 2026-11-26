@@ -20,7 +20,7 @@ const execFileAsync = promisify(execFile);
  *    vs npm installs (`npm install -g vetoboard-mcp@latest`).
  */
 
-export const CURRENT_VETOBOARD_VERSION = "1.5.0";
+export const CURRENT_VETOBOARD_VERSION = "1.5.1";
 export const DEFAULT_NPM_LATEST_URL = "https://registry.npmjs.org/vetoboard-mcp/latest";
 const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 

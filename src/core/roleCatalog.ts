@@ -640,6 +640,384 @@ const TECH_HEAVY_RE =
 const MARKET_HEAVY_RE =
   /(?:赛道|选品|转型|市场|竞品|买单|切入|方向|出海|独立站|跨境|market|positioning|pivot|competitor|niche|go[- ]to[- ]market)/iu;
 
+const EXPLICIT_COMMERCIAL_VENTURE_RE =
+  /(?:创业|立项|商业计划|商业模式|副业|选品|独立站|跨境|出海|客单价|毛利|盈亏平衡|回本|抽佣|获客|转化率|订阅|月费|年费|B2B|B2C|SaaS|PLG|PRD|RICE|SKU|BOM|报价|供应商|合同|开票|维修|代理|分销|门店|加盟|startup|business\s+plan|monetiz|pricing|unit\s+economics|arpu|churn|bep\b|margin|go[- ]to[- ]market|ecommerce)/iu;
+
+const SOCIO_MACRO_POLICY_RE =
+  /(?:阶级|阶层|社会流动|跃迁|跳跃|固化|穷人|富人|贫富|寒门|代际|家庭背景|户籍|城乡|教育公平|高考|分流|生育|人口|老龄化|养老|财政|转移支付|税制|贫民|内卷|失业率|基尼|垄断|制度|政策|体制|历史周期|地缘|social\s+mobility|class\s+mobility|inequality|poverty|intergenerational|demographic|public\s+policy|macroeconom|sociolog|geopolit|institutional)/iu;
+
+const PERSONAL_DECISION_RE =
+  /(?:读博|考研|考公|考编|辞职|裸辞|跳槽|转行|留学|出国|定居|移民|买房|租房|提前还贷|全职做|30岁|35岁|中年危机|职业规划|选offer|拿了.*offer|去大厂|回老家|二线城市|结婚|生娃|个人选择|人生规划|phd\b|grad\s+school|quit\s+my\s+job|career\s+switch|buy\s+vs\s+rent|job\s+offer|relocat)/iu;
+
+const OPEN_RESEARCH_ANALYSIS_RE =
+  /(?:为什么|为何|怎么理解|深层原因|根本原因|成因|底层逻辑|本质是什么|趋势研判|前景分析|真假|是不是骗局|利弊分析|文献综述|技术演进|科学原理|why\s+is|why\s+do|why\s+does|why\s+can't|why\s+are|root\s+cause|underlying\s+mechanism|deep\s+dive|fact[- ]?check|literature\s+review)/iu;
+
+export const DYNAMIC_TOPIC_ARCHETYPE_ROLE_IDS = new Set([
+  "macro-household-economist",
+  "institutional-mobility-analyst",
+  "asymmetric-risk-sociologist",
+  "empirical-pathway-falsifier",
+  "opportunity-cost-actuary",
+  "labor-supply-demand-researcher",
+  "tail-risk-stress-tester",
+  "reversible-pilot-designer",
+  "primary-evidence-investigator",
+  "mechanism-first-principles",
+  "counter-hypothesis-devil",
+  "boundary-action-synthesizer",
+]);
+
+/**
+ * Synthesizes tailored specialist role templates when the user's goal is a Socio-Economic / Policy,
+ * Personal Career/Asset Decision, or Open-Domain Analytical Research topic (rather than forcing commercial BOM/SKU startup roles!).
+ */
+export function synthesizeTopicAdaptiveRoles(
+  goal: string,
+  domain: "commercial" | "swe" = "commercial",
+): { readonly archetype: "socio_macro" | "personal_decision" | "open_research"; readonly roles: RoleTemplate[] } | undefined {
+  if (domain === "swe") return undefined;
+  if (EXPLICIT_COMMERCIAL_VENTURE_RE.test(goal)) return undefined;
+
+  if (SOCIO_MACRO_POLICY_RE.test(goal) && !PERSONAL_DECISION_RE.test(goal)) {
+    return {
+      archetype: "socio_macro",
+      roles: [
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "vetoboard_calc"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "Live `search_web`/`WebSearch` citing official statistical bureaus, World Bank/OECD, or peer-reviewed household panel surveys (CFPS/CHFS) with real `https://` URLs",
+            "Deterministic `vetoboard_calc` modeling of quantile disposable income, living-cost surplus, savings accumulation years, and human-capital ROI",
+          ],
+          executableRules: [
+            {
+              description: "Must verify empirical income/wealth distribution data via WebSearch and compute household surplus math via vetoboard_calc.",
+              enforcement: "hard",
+              escalateOnTrigger: false,
+              forbiddenPatterns: [],
+              mustIncludeKeywords: [],
+              mustInvokeSkills: [],
+              mustUseTools: ["WebSearch", "vetoboard_calc"],
+              ruleId: "rule-macro-household-quant",
+              title: "Mandatory Empirical Quantile Data & Household Surplus Math",
+            },
+          ],
+          kind: "professional",
+          name: {
+            en: "Macro-Distribution & Household Balance-Sheet Actuary",
+            zh: "宏观分配与家庭资产负债精算专员",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "macro-household-economist",
+          systemCharter: {
+            en: "You are the [Primary Lead · Weight 95/100] Macro-Distribution & Household Balance-Sheet Actuary. 1) Query live statistical yearbooks, household surveys (e.g. NBS quintiles, CFPS/CHFS, World Bank/WID), and wage/return-to-education data (`https://` URLs) — NEVER rely on anecdotes! 2) Use `vetoboard_calc` to model bottom-20%/40% vs top-20% household net annual surplus after rigid housing/food/medical/education costs, capital accumulation years required to cross asset thresholds, and real return on schooling. 3) Separate `[VERIFIED]` empirical statistics from `[MODEL-DERIVED]` equations.",
+            zh: "你是【核心主导 · 权重 95/100】宏观分配与家庭资产负债精算专员。针对当前社会经济议题：1) **必先联网抓取权威统计分位数与微观家计调查数据**（如国家统计局五等份可支配收入、CHFS/CFPS 家庭金融调查、教育回报率、基尼与代际收入弹性系数，附真实 `https://` 链接，严禁靠身边统计学拍脑袋！）；2) **调用 `vetoboard_calc` 精确算清底层家庭收支死账**：扣除刚性衣食住行医教支出后的年度净结余、攒够首笔生产性资本所需年限、以及高等教育的投入回收期；3) 严格区分【已验证统计事实】与【模型推算】。",
+          },
+          weight: 95,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+          domain: "compliance",
+          evidenceRequirements: [
+            "Live verification (`search_web`/`WebSearch`) of fiscal transfer structures, household registration/education allocation rules, social safety nets, and formal credit barriers (`https://` URLs)",
+          ],
+          executableRules: [
+            {
+              description: "Must ground institutional & policy analysis in verifiable public documents and statutes via WebSearch.",
+              enforcement: "hard",
+              escalateOnTrigger: false,
+              forbiddenPatterns: [],
+              mustIncludeKeywords: [],
+              mustInvokeSkills: [],
+              mustUseTools: ["WebSearch"],
+              ruleId: "rule-institutional-grounding",
+              title: "Mandatory Institutional & Policy Source Grounding",
+            },
+          ],
+          kind: "professional",
+          name: {
+            en: "Institutional Rules & Public Resource Allocation Analyst",
+            zh: "制度结构与公共资源分配分析师",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "institutional-mobility-analyst",
+          systemCharter: {
+            en: "You are the [Primary Co-Lead · Weight 92/100] Institutional Rules & Public Resource Allocation Analyst. Dissect structural rules governing upward mobility with verifiable policy/academic sources (`https://` URLs): 1) Educational screening & regional/urban-rural per-student fiscal disparities; 2) Hukou, land/property wealth appreciation capture, and tax structure (indirect vs direct/inheritance tax); 3) Social insurance replacement rates and collateral barriers in formal credit markets.",
+            zh: "你是【核心主责 · 权重 92/100】制度结构与公共资源分配分析师。负责穿透拆解影响阶层流动的制度性结构变量（必附真实政策文本、财政数据或学术实证 `https://` 链接）：1) **教育选拔与公共投入差异**（城乡/区域生均经费、中考分流与重点高校录取结构）；2) **财税结构与资产增值分配**（间接税比重、土地与不动产周期红利归属、户籍绑定公共服务）；3) **正规金融信贷抵押门槛与社保兜底替代率差异**。",
+          },
+          weight: 92,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "Quantified Risk-of-Ruin / asymmetric trial-and-error cost model + cognitive/network information lag analysis (`https://` sources)",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Social Capital, Information Asymmetry & Risk-of-Ruin Specialist",
+            zh: "社会资本、信息差与试错容错率专员",
+          },
+          priorityTier: "guardrail",
+          readOnly: true,
+          roleId: "asymmetric-risk-sociologist",
+          systemCharter: {
+            en: "You are the [Guardrail · Weight 86/100] Social Capital, Information Asymmetry & Risk-of-Ruin Specialist. Analyze micro-behavioral & network traps: 1) **Asymmetric Risk of Ruin (Ergodicity Trap)**: compute why a 30% failure shock is a recoverable learning experience for an affluent family but triggers permanent debt/poverty lock-in for a zero-buffer household (`vetoboard_calc`); 2) **Information Lag & Tacit Knowledge**: career track blind spots, mentorship deficits, and predatory 'get-rich-quick' traps targeting low-income families; 3) Health/unemployment shock vulnerability.",
+            zh: "你是【风控护栏 · 权重 86/100】社会资本、信息差与试错容错率专员。从非遍历性博弈（Ergodicity）与社会学视角拆解微观锁死机制：1) **非对称试错破产率（Risk of Ruin）**：用数字对比『中产家庭试错 3 次容错垫』与『无安全垫家庭一次重病/烂尾/择业踏空即陷入高息负债死循环』的数学不对等；2) **隐性知识与信息滞后税**：赛道认知代差、高价值人脉信用背书缺失与针对底层的割韭菜陷阱；3) 带宽稀缺效应对长期规划能力的挤压。",
+          },
+          weight: 86,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "engineering",
+          evidenceRequirements: [
+            "Cross-country / cross-cohort mobility elasticity benchmarks + falsification of fake shortcuts vs high-leverage real pathways (`https://` URLs)",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Comparative Mobility & Actionable Pathway Falsifier",
+            zh: "跨期比较与现实破局路径证伪专员",
+          },
+          priorityTier: "secondary",
+          readOnly: true,
+          roleId: "empirical-pathway-falsifier",
+          systemCharter: {
+            en: "You are the [Support · Weight 78/100] Comparative Mobility & Actionable Pathway Falsifier. Prevent fatalistic echo chambers and survivorship-bias myths alike: 1) Benchmark intergenerational elasticity (IGE) across historical cohorts (e.g. 1980s-2000s boom vs post-2020 structural slowdown) and international peers; 2) Brutally falsify outdated mobility myths (e.g. debt-fueled credential inflation or high-capex small retail); 3) Identify narrow but empirically real asymmetric levers (zero-marginal-cost digital/AI leverage, geographic wage arbitrage, catastrophic downside insurance).",
+            zh: "你是【次级支撑 · 权重 78/100】跨期比较与现实破局路径证伪专员。防止讨论滑向空洞鸡汤或纯粹宿命论抱怨：1) **跨周期与跨国代际收入弹性（IGE）横向对照**：对比增量扩张期（1990–2015）与存量博弈期（2020+）跃迁通道收窄的真实幅度；2) **残酷证伪过时伪路径**（如盲目高负债刷低含金量文凭、重资产加盟开店当炮灰）；3) **提炼经得起算账的现实正期望杠杆**（低边际成本数字/技术技能杠杆、跨地域汇率/薪资差套利、先筑底防返贫保险护城河）。",
+          },
+          weight: 78,
+        },
+      ],
+    };
+  }
+
+  if (PERSONAL_DECISION_RE.test(goal)) {
+    return {
+      archetype: "personal_decision",
+      roles: [
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "5-to-10-year cumulative net cashflow & NPV comparison across all decision branches via `vetoboard_calc`",
+          ],
+          executableRules: [
+            {
+              description: "Must compute multi-year opportunity cost and net cashflow comparison via vetoboard_calc.",
+              enforcement: "hard",
+              escalateOnTrigger: false,
+              forbiddenPatterns: [],
+              mustIncludeKeywords: [],
+              mustInvokeSkills: [],
+              mustUseTools: ["vetoboard_calc"],
+              ruleId: "rule-personal-npv-calc",
+              title: "Mandatory Multi-Year Opportunity Cost & Cashflow Math",
+            },
+          ],
+          kind: "professional",
+          name: {
+            en: "Lifecycle Opportunity-Cost & Cashflow NPV Actuary",
+            zh: "全周期机会成本与净现金流精算师",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "opportunity-cost-actuary",
+          systemCharter: {
+            en: "You are the [Primary Lead · Weight 95/100] Lifecycle Opportunity-Cost & Cashflow NPV Actuary. Model Option A vs Option B over a 5-to-10-year horizon using `vetoboard_calc`: foregone salary, tuition/transaction friction, tax/living cost differentials, and break-even year.",
+            zh: "你是【核心主导 · 权重 95/100】全周期机会成本与净现金流精算师。严禁感性拍脑袋，必须调用 `vetoboard_calc` 并表测算各备选路径未来 5–10 年的真实累计净现金流、放弃的确定性收入（机会成本）、交易/迁徙摩擦损耗与回本交叉年份。",
+          },
+          weight: 95,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "Live `search_web`/`WebSearch` citing real placement rates, median compensation quantiles, and supply/demand trends (`https://` URLs)",
+          ],
+          executableRules: [
+            {
+              description: "Must verify current market compensation and placement rates via live WebSearch.",
+              enforcement: "hard",
+              escalateOnTrigger: false,
+              forbiddenPatterns: [],
+              mustIncludeKeywords: [],
+              mustInvokeSkills: [],
+              mustUseTools: ["WebSearch"],
+              ruleId: "rule-labor-web-grounding",
+              title: "Mandatory Live Labor/Asset Market Grounding",
+            },
+          ],
+          kind: "professional",
+          name: {
+            en: "Real Supply-Demand & Quantile Compensation Researcher",
+            zh: "真实供需格局与分位数回报调查员",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "labor-supply-demand-researcher",
+          systemCharter: {
+            en: "You are the [Primary Co-Lead · Weight 92/100] Real Supply-Demand & Quantile Compensation Researcher. Query live 2025/2026 job-market/asset benchmarks, graduation/admission bottlenecks, median (P50, NOT top-1%!) outcomes, and 3-5 year oversupply risks (`https://` URLs).",
+            zh: "你是【核心主责 · 权重 92/100】真实供需格局与分位数回报调查员。联网抓取 2025/2026 最新真实招聘/成交中位数（严禁拿前 1% 幸存者高薪当常态！）、真实淘汰/延毕率，以及 3–5 年后毕业或入局时的产能过剩风险（必附真实 `https://` 链接）。",
+          },
+          weight: 92,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "compliance",
+          evidenceRequirements: [
+            "Worst-case downside stress test (runway months, irreversible lock-in clauses, contract/visa/liquidity redlines)",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Downside Tail-Risk & Irreversibility Guardrail",
+            zh: "下行黑天鹅与不可逆代价风控官",
+          },
+          priorityTier: "guardrail",
+          readOnly: true,
+          roleId: "tail-risk-stress-tester",
+          systemCharter: {
+            en: "You are the [Guardrail · Weight 85/100] Downside Tail-Risk & Irreversibility Guardrail. Stress-test worst-case scenarios (delayed graduation, layoff, liquidity freeze, policy shift, family emergency), contractual/institutional lock-ins, and minimum cash runway.",
+            zh: "你是【风控护栏 · 权重 85/100】下行黑天鹅与不可逆代价风控官。专门推演最坏情景（延毕/失业/政策变动/流动性锁死/家庭突发开支）下的现金流安全垫月数、违约金/服务期锁死条款与退路成本。",
+          },
+          weight: 85,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch"],
+          domain: "engineering",
+          evidenceRequirements: [
+            "Low-cost reversible validation experiment (30-90 day pilot) + explicit numeric kill/commit triggers",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Low-Cost Reversible Pilot & Kill-Criteria Designer",
+            zh: "低成本可逆试水与止损触发器设计师",
+          },
+          priorityTier: "secondary",
+          readOnly: true,
+          roleId: "reversible-pilot-designer",
+          systemCharter: {
+            en: "You are the [Support · Weight 78/100] Low-Cost Reversible Pilot & Kill-Criteria Designer. Replace all-in irreversible leaps with a 30-to-90-day low-cost validation plan and hard numeric go/no-go triggers.",
+            zh: "你是【次级支撑 · 权重 78/100】低成本可逆试水与止损触发器设计师。拒绝破釜沉舟式梭哈，设计一套 30–90 天不砸锅卖铁的最小可逆验证方案，并给出明确的量化继续/止损触发线。",
+          },
+          weight: 78,
+        },
+      ],
+    };
+  }
+
+  if (OPEN_RESEARCH_ANALYSIS_RE.test(goal)) {
+    return {
+      archetype: "open_research",
+      roles: [
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "vetoboard_calc"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "Live `search_web`/`WebSearch` citing primary empirical datasets, peer-reviewed papers, or official reports (`https://` URLs)",
+          ],
+          executableRules: [
+            {
+              description: "Must ground analysis in live primary web sources via WebSearch.",
+              enforcement: "hard",
+              escalateOnTrigger: false,
+              forbiddenPatterns: [],
+              mustIncludeKeywords: [],
+              mustInvokeSkills: [],
+              mustUseTools: ["WebSearch"],
+              ruleId: "rule-open-primary-evidence",
+              title: "Mandatory Primary Empirical Source Verification",
+            },
+          ],
+          kind: "professional",
+          name: {
+            en: "Primary Empirical Data & Baseline Investigator",
+            zh: "一手实证数据与基准溯源调查官",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "primary-evidence-investigator",
+          systemCharter: {
+            en: "You are the [Primary Lead · Weight 95/100] Primary Empirical Data & Baseline Investigator. Gather verifiable primary statistics, official disclosures, and quantitative baselines (`https://` URLs + `vetoboard_calc`), separating hard facts from popular myths.",
+            zh: "你是【核心主导 · 权重 95/100】一手实证数据与基准溯源调查官。先联网抓取权威原始统计、论文数据与官方披露（必附真实 `https://` 链接，涉及量化比例/增速调 `vetoboard_calc` 核算），先把事实底数核准，剥离二手传言。",
+          },
+          weight: 95,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "engineering",
+          evidenceRequirements: [
+            "First-principles causal mechanism chain + quantitative bottleneck equations (`vetoboard_calc`)",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "First-Principles Causal Mechanism Analyst",
+            zh: "第一性原理与因果机制拆解专员",
+          },
+          priorityTier: "primary",
+          readOnly: true,
+          roleId: "mechanism-first-principles",
+          systemCharter: {
+            en: "You are the [Primary Co-Lead · Weight 92/100] First-Principles Causal Mechanism Analyst. Decompose the root physical, economic, or incentive feedback loops driving the phenomenon — distinguish correlation from causation.",
+            zh: "你是【核心主责 · 权重 92/100】第一性原理与因果机制拆解专员。从激励相容、约束边界与反馈回路拆解现象背后的根本因果链条，严格区分「相关性表象」与「结构性根因」。",
+          },
+          weight: 92,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch"],
+          domain: "compliance",
+          evidenceRequirements: [
+            "Strongest steelman counter-hypotheses, survivorship/selection bias audit, and historical/international counterexamples (`https://` URLs)",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Counter-Hypothesis & Survivorship-Bias Challenger",
+            zh: "反方假说证伪与幸存者偏差挑战官",
+          },
+          priorityTier: "guardrail",
+          readOnly: true,
+          roleId: "counter-hypothesis-devil",
+          systemCharter: {
+            en: "You are the [Guardrail · Weight 86/100] Counter-Hypothesis & Survivorship-Bias Challenger. Stress-test the premise itself: hunt for selection bias, omitted variables, and real-world counterexamples that falsify simplistic narratives.",
+            zh: "你是【风控护栏 · 权重 86/100】反方假说证伪与幸存者偏差挑战官。专门挑战预设前提本身：排查样本偏差、混淆变量与跨国/跨期真实反例，推翻单一归因谬误。",
+          },
+          weight: 86,
+        },
+        {
+          allowedTools: ["Read", "Grep", "Glob", "WebSearch", "vetoboard_calc"],
+          domain: "commercial",
+          evidenceRequirements: [
+            "Explicit boundary conditions + falsifiable predictions or actionable takeaways",
+          ],
+          executableRules: [],
+          kind: "professional",
+          name: {
+            en: "Boundary Conditions & Actionable Implications Strategist",
+            zh: "适用边界与可验证推演专员",
+          },
+          priorityTier: "secondary",
+          readOnly: true,
+          roleId: "boundary-action-synthesizer",
+          systemCharter: {
+            en: "You are the [Support · Weight 78/100] Boundary Conditions & Actionable Implications Strategist. Define under what threshold conditions the conclusion holds or flips, and distill concrete, testable implications.",
+            zh: "你是【次级支撑 · 权重 78/100】适用边界与可验证推演专员。界定结论成立与失效的临界条件，并提炼可观测验证的客观指标与现实应对策略。",
+          },
+          weight: 78,
+        },
+      ],
+    };
+  }
+
+  return undefined;
+}
+
 export interface ResolveCouncilLineupInput {
   readonly goal: string;
   readonly domain?: "commercial" | "swe";
@@ -693,6 +1071,11 @@ export function resolveCouncilLineup(input: ResolveCouncilLineupInput): Resolved
   const includeInspector = input.includeInspector !== false;
   const rationale: string[] = [];
 
+  const adaptiveArchetype =
+    input.roleIds === undefined && (input.customRoles?.length ?? 0) === 0
+      ? synthesizeTopicAdaptiveRoles(input.goal, domain)
+      : undefined;
+
   const buildSmartDefaultSpecialists = (): string[] => {
     const g = input.goal;
     if (domain === "swe") {
@@ -709,24 +1092,41 @@ export function resolveCouncilLineup(input: ResolveCouncilLineupInput): Resolved
       return base;
     }
 
-    const base = ["market-analyst", "profit-modeler", "legal-advisor", "tech-feasibility"];
-    const extra: string[] = [];
-    if (/(?:招聘|人效|用工|编制|人均创收|人力资源|headcount|hiring|per[- ]?capita\s+roi)/iu.test(g)) {
-      extra.push("hr-roi-analyst");
+    if (adaptiveArchetype) {
+      return [];
     }
-    if (/(?:PLG|开源商业化|开源转云|蚕食|病毒裂变|Freemium|open[- ]?core)/iu.test(g)) {
-      extra.push("plg-growth-strategist");
+
+    const hasHr = /(?:招聘|人效|用工|编制|人均创收|人力资源|团队扩张|headcount|hiring|per[- ]?capita\s+roi)/iu.test(g);
+    const hasPlg = /(?:PLG|开源商业化|开源转云|蚕食|病毒裂变|Freemium|open[- ]?core)/iu.test(g);
+    const hasBilling = /(?:多租户|积分池|防薅羊毛|防刷号|双花|账本回滚|SaaS\s*计费|credit\s+ledger|anti[- ]?fraud)/iu.test(g);
+    const hasSop = /(?:SOP|标准作业|现场履约|服务手册|工序拆解|门店运营|fulfillment\s+sop)/iu.test(g);
+    const hasPrd = /(?:PRD|RICE|需求排期|产品路线图|功能优先级|feature\s+priorit)/iu.test(g);
+    const hasRisk = /(?:供应链断供|风控|压力测试|黑天鹅|合同审查|条款风险|supply[- ]?chain\s+risk|contract\s+review)/iu.test(g);
+
+    if (hasPlg || hasBilling) {
+      return [
+        ...(hasPlg ? ["plg-growth-strategist"] : ["market-analyst"]),
+        "profit-modeler",
+        ...(hasBilling ? ["saas-billing-architect"] : ["tech-feasibility"]),
+        "legal-advisor",
+      ];
     }
-    if (/(?:多租户|积分池|防薅羊毛|防刷号|双花|账本回滚|SaaS\s*计费|credit\s+ledger|anti[- ]?fraud)/iu.test(g)) {
-      extra.push("saas-billing-architect");
+    if (hasHr || hasSop) {
+      return [
+        ...(hasHr ? ["hr-roi-analyst"] : ["market-analyst"]),
+        "profit-modeler",
+        ...(hasSop ? ["operations-sop"] : ["tech-feasibility"]),
+        ...(hasRisk ? ["risk-assessor"] : ["legal-advisor"]),
+      ];
     }
-    if (/(?:SOP|标准作业|现场履约|服务手册|工序拆解|fulfillment\s+sop)/iu.test(g)) {
-      extra.push("operations-sop");
+    if (hasPrd) {
+      return ["product-strategist", "market-analyst", "profit-modeler", "tech-feasibility"];
     }
-    if (/(?:PRD|RICE|需求排期|产品路线图|feature\s+priorit)/iu.test(g)) {
-      extra.push("product-strategist");
+    if (hasRisk && !MARKET_HEAVY_RE.test(g)) {
+      return ["legal-advisor", "risk-assessor", "profit-modeler", "operations-sop"];
     }
-    return [...base, ...extra.slice(0, 2)];
+
+    return ["market-analyst", "profit-modeler", "legal-advisor", "tech-feasibility"];
   };
 
   const defaultSpecialistIds = buildSmartDefaultSpecialists();
@@ -742,10 +1142,31 @@ export function resolveCouncilLineup(input: ResolveCouncilLineupInput): Resolved
   );
 
   let specialists: RoleTemplate[] = [];
-  for (const id of requestedIds) {
-    if (excludeSet.has(id.toLowerCase())) continue;
-    const found = findRoleTemplate(id) ?? reusableById.get(id.toLowerCase());
-    if (found) specialists.push({ ...found });
+  if (adaptiveArchetype) {
+    for (const dynRole of adaptiveArchetype.roles) {
+      if (!excludeSet.has(dynRole.roleId.toLowerCase())) {
+        specialists.push({ ...dynRole });
+      }
+    }
+    const archetypeLabelZh =
+      adaptiveArchetype.archetype === "socio_macro"
+        ? "识别到宏观社会经济 / 阶层流动 / 制度政策议题 → 动态生成 4 席实证统计与制度博弈专员（跳过通用商业选品/BOM模板）"
+        : adaptiveArchetype.archetype === "personal_decision"
+          ? "识别到个人职业 / 学业 / 资产重大决策议题 → 动态生成 4 席全周期机会成本与下行底线风控专员"
+          : "识别到开放式深度成因 / 趋势研判议题 → 动态生成 4 席一手实证调查与反方证伪专员";
+    const archetypeLabelEn =
+      adaptiveArchetype.archetype === "socio_macro"
+        ? "Detected socio-economic / mobility / policy topic -> synthesized 4 empirical distribution & institutional specialists"
+        : adaptiveArchetype.archetype === "personal_decision"
+          ? "Detected personal career / life decision -> synthesized 4 opportunity-cost NPV & tail-risk specialists"
+          : "Detected open-domain root-cause inquiry -> synthesized 4 primary-evidence & counter-hypothesis specialists";
+    rationale.push(zh ? archetypeLabelZh : archetypeLabelEn);
+  } else {
+    for (const id of requestedIds) {
+      if (excludeSet.has(id.toLowerCase())) continue;
+      const found = findRoleTemplate(id) ?? reusableById.get(id.toLowerCase());
+      if (found) specialists.push({ ...found });
+    }
   }
 
   // Also auto-include saved library / workspace reusable roles when default lineup is used and they match strongly
@@ -1422,34 +1843,25 @@ export function recommendModelForRole(params: {
     };
   }
 
-  // Universal cross-platform semantic tier fallback when host did not report specific model IDs
+  // Universal cross-platform semantic tier fallback when host did not report specific model IDs:
+  // Follow the Flash model-sizing law — use fast/cost-effective Flash for specialist seats, reserving `pro` ONLY for the cross-check Inspector!
   if (role.kind === "inspector") {
     return {
       displayLabel: zh ? "pro / 异构核验档" : "pro (Adversarial Check)",
       modelId: "pro",
     };
   }
-  if (role.priorityTier === "primary" || role.roleId === "profit-modeler") {
-    return {
-      displayLabel: zh ? "pro / 旗舰强推理档" : "pro (Frontier Reasoning)",
-      modelId: "pro",
-    };
-  }
-  if (role.priorityTier === "secondary") {
-    return {
-      displayLabel: zh ? "flash / 高速轻量档" : "flash (Fast Tier)",
-      modelId: "flash",
-    };
-  }
   return {
-    displayLabel: zh ? "inherit / 均衡主力档" : "inherit (Balanced)",
-    modelId: "inherit",
+    displayLabel: zh ? "flash / 高性价比主力档 (可改)" : "flash (Recommended Fast Tier)",
+    modelId: "flash",
   };
 }
 
 export function buildLineupSelectorPlan(params: {
   readonly goal: string;
   readonly domain?: "commercial" | "swe";
+  readonly roleIds?: readonly string[];
+  readonly customRoles?: readonly CustomRoleInput[];
   readonly discoveredSkills?: readonly DiscoveredSkill[];
   readonly hostModels?: readonly HostModelCandidate[];
   readonly rawHostModelsJson?: string;
@@ -1476,6 +1888,8 @@ export function buildLineupSelectorPlan(params: {
     readonly boundSkills: readonly string[];
     readonly recommendedModelId: string;
     readonly recommendedModelLabel: string;
+    readonly charterSummary?: string;
+    readonly isTopicTailored?: boolean;
   }[];
   readonly rationale: readonly string[];
   readonly questions: readonly ClarifyQuestion[];
@@ -1485,10 +1899,12 @@ export function buildLineupSelectorPlan(params: {
   const discovered = params.discoveredSkills ?? [];
   const resolved = resolveCouncilLineup({
     autoTuneWeights: true,
+    customRoles: params.customRoles,
     discoveredSkills: discovered,
     domain: params.domain,
     goal: params.goal,
     locale,
+    roleIds: params.roleIds,
   });
 
   const skillRec = recommendSkillBindingsAndCandidates({
@@ -1658,8 +2074,19 @@ export function buildLineupSelectorPlan(params: {
         primaryLeadFamily,
         role: r,
       });
+      const customSet = new Set((params.customRoles ?? []).map((c) => c.roleId.trim().toLowerCase()));
+      const isTopicTailored =
+        DYNAMIC_TOPIC_ARCHETYPE_ROLE_IDS.has(r.roleId) || customSet.has(r.roleId.toLowerCase());
+      const rawCharterFirstLine = r.systemCharter[locale]
+        .split(/\r?\n/)[0]!
+        .replace(/^你是【[^】]+】[^。]*。?/u, "")
+        .replace(/^You are the \[[^\]]+\][^.]*\.\s*/i, "")
+        .trim()
+        .slice(0, 96);
       return {
         boundSkills: resolved.boundSkillsByRoleId[r.roleId] ?? [],
+        ...(rawCharterFirstLine ? { charterSummary: rawCharterFirstLine } : {}),
+        ...(isTopicTailored ? { isTopicTailored: true } : {}),
         priorityTier: r.priorityTier,
         recommendedModelId: mPick.modelId,
         recommendedModelLabel: mPick.displayLabel,

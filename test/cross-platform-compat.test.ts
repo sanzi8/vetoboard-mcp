@@ -1072,4 +1072,143 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
     expect(finalReport).toContain("🔒返工冻结抢占");
     expect(finalReport).toContain("⚡动态增援");
   });
+
+  it("10. Topic-Adaptive Role Synthesis & Pre-Flight `customRoles`: tailors specialist lineups to socio-economic, personal-career, open-research, and bespoke topics instead of repeating startup roles", async () => {
+    // 10a. Socio-economic mobility analysis -> synthesizes 4 socio-macro specialists, defaults fallback model to `flash`, and strips SWE/chat-closing skill noise
+    const socioGoal = "为什么在中国穷人家庭很难阶级跳跃";
+    const socioPlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            goal: socioGoal,
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    const socioRoleIds = socioPlan.recommendedLineup.map((r: { roleId: string }) => r.roleId);
+    expect(socioRoleIds).toEqual([
+      "macro-household-economist",
+      "institutional-mobility-analyst",
+      "asymmetric-risk-sociologist",
+      "empirical-pathway-falsifier",
+      "quality-inspector",
+    ]);
+    expect(socioRoleIds).not.toContain("market-analyst");
+    expect(socioRoleIds).not.toContain("tech-feasibility");
+    expect(socioPlan.briefingMarkdown).toContain("🎯 按题定制专员");
+    expect(socioPlan.briefingMarkdown).not.toContain("karpathy-guidelines");
+    expect(socioPlan.briefingMarkdown).not.toContain("discernment-nudge");
+
+    // Fallback model picker (when `rawHostModelsJson` is omitted) defaults specialists to `flash` and inspector to `pro`
+    const leadSeat = socioPlan.recommendedLineup.find(
+      (r: { roleId: string }) => r.roleId === "macro-household-economist",
+    );
+    const inspectorSeat = socioPlan.recommendedLineup.find(
+      (r: { roleId: string }) => r.roleId === "quality-inspector",
+    );
+    expect(leadSeat.recommendedModelId).toBe("flash");
+    expect(inspectorSeat.recommendedModelId).toBe("pro");
+
+    // `vetoboard_start_council` launches those exact socio-economic tracks cleanly
+    const socioStartText = firstText(
+      await client.callTool({
+        arguments: {
+          domain: "commercial",
+          effortProfile: "fast",
+          goal: socioGoal,
+          lang: "zh",
+          lineupConfirmed: true,
+          workspaceDir: tempDir,
+        },
+        name: "vetoboard_start_council",
+      }),
+    );
+    expect(socioStartText).toContain("macro-household-economist");
+    expect(socioStartText).toContain("institutional-mobility-analyst");
+    expect(socioStartText).not.toContain("track-1-market-analyst");
+
+    // 10b. Personal career/life decision -> synthesizes opportunity-cost & labor-market specialists
+    const careerPlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            goal: "32岁后端程序员要不要脱产辞职去读博或考公",
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    expect(careerPlan.recommendedLineup.map((r: { roleId: string }) => r.roleId)).toEqual([
+      "opportunity-cost-actuary",
+      "labor-supply-demand-researcher",
+      "tail-risk-stress-tester",
+      "reversible-pilot-designer",
+      "quality-inspector",
+    ]);
+
+    // 10c. Open-domain scientific/technological inquiry -> synthesizes first-principles & falsification research specialists
+    const researchPlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            domain: "commercial",
+            goal: "为什么全固态锂电池硫化物电解质在大规模量产时面临固固界面阻抗瓶颈",
+            lang: "zh",
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    expect(researchPlan.recommendedLineup.map((r: { roleId: string }) => r.roleId)).toEqual([
+      "primary-evidence-investigator",
+      "mechanism-first-principles",
+      "counter-hypothesis-devil",
+      "boundary-action-synthesizer",
+      "quality-inspector",
+    ]);
+
+    // 10d. Arbitrary bespoke `customRoles` + `roleIds: []` in `vetoboard_plan_lineup`
+    const customPlan = JSON.parse(
+      firstText(
+        await client.callTool({
+          arguments: {
+            customRoles: [
+              {
+                charter: "核查三甲医院临床试验入组率、CRC 随访脱落率与伦理审查周期。",
+                priorityTier: "primary",
+                roleId: "clinical-trial-methodologist",
+                title: "临床试验设计与入组核查专员",
+                weight: 95,
+              },
+              {
+                charter: "核查医保集采 DRG/DIP 支付标准与院外自费弹性边界。",
+                priorityTier: "guardrail",
+                roleId: "drg-reimbursement-auditor",
+                title: "医保 DRG 支付与准入精算官",
+                weight: 86,
+              },
+            ],
+            domain: "commercial",
+            goal: "评估某二类医疗器械院内临床入组与 DRG 准入路径",
+            lang: "zh",
+            roleIds: [],
+          },
+          name: "vetoboard_plan_lineup",
+        }),
+      ),
+    );
+    expect(customPlan.recommendedLineup.map((r: { roleId: string }) => r.roleId)).toEqual([
+      "clinical-trial-methodologist",
+      "drg-reimbursement-auditor",
+      "quality-inspector",
+    ]);
+    expect(customPlan.briefingMarkdown).toContain("临床试验设计与入组核查专员");
+    expect(customPlan.briefingMarkdown).toContain("🎯 按题定制专员");
+    expect(customPlan.briefingMarkdown).toContain("核查三甲医院临床试验入组率");
+  });
 });
