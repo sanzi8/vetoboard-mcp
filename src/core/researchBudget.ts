@@ -1,5 +1,6 @@
 import type { VetoBoardLocale } from "../i18n/locales.js";
-import type { VetoBoardEffortProfile } from "./types.js";
+import { resolveBorgPriorityTierFromWeight } from "./borgQuotaPool.js";
+import type { RolePriorityTier, VetoBoardEffortProfile } from "./types.js";
 
 /**
  * Effort-Scaling Search & Turn Quota Engine (`researchBudget.ts`).
@@ -52,6 +53,9 @@ export function resolveTurnResearchBudget(params: {
   readonly tier: VetoBoardEffortTier;
   readonly effortProfile?: VetoBoardEffortProfile;
   readonly roleId?: string;
+  readonly weight?: number;
+  readonly priorityTier?: RolePriorityTier;
+  readonly webCapable?: boolean;
 }): TurnResearchBudget {
   const deep = params.effortProfile === "deep";
   const envMaxSteps = parsePositiveIntEnv("VETOBOARD_MAX_STEPS");
@@ -60,28 +64,81 @@ export function resolveTurnResearchBudget(params: {
 
   // Pure quantitative actuary (`profit-modeler`) may rely on market/tech web URLs once anchored, needing >=1 benchmark check
   const isActuary = params.roleId === "profit-modeler";
+  const effectiveQoS: RolePriorityTier | undefined =
+    params.weight !== undefined
+      ? resolveBorgPriorityTierFromWeight(params.weight, params.priorityTier, true)
+      : params.priorityTier;
 
   const defaults: Record<VetoBoardEffortTier, Omit<TurnResearchBudget, "tier">> = {
     board_prep: {
       label: { en: "Whiteboard Grounding Prep", zh: "白板前置联网摸底" },
-      maxExternalResearchCalls: deep ? 8 : 5,
-      maxModelSteps: deep ? 14 : 10,
-      maxSameDomainFetches: 2,
-      minExternalWebSources: isActuary ? 0 : 1,
+      maxExternalResearchCalls:
+        params.webCapable === false
+          ? 0
+          : effectiveQoS === "secondary"
+            ? deep
+              ? 3
+              : 2
+            : effectiveQoS === "primary"
+              ? deep
+                ? 8
+                : 6
+              : deep
+                ? 6
+                : 5,
+      maxModelSteps:
+        effectiveQoS === "secondary" ? 8 : deep ? 14 : 10,
+      maxSameDomainFetches: params.webCapable === false ? 0 : 2,
+      minExternalWebSources: params.webCapable === false || isActuary ? 0 : 1,
     },
     inspection: {
       label: { en: "Read-Only Adversarial Inspection", zh: "只读独立抽检核验" },
-      maxExternalResearchCalls: 6,
-      maxModelSteps: 14,
+      maxExternalResearchCalls: deep ? 10 : 6,
+      maxModelSteps: deep ? 18 : 14,
       maxSameDomainFetches: 3,
       minExternalWebSources: 0,
     },
     research: {
       label: { en: "Primary Field Evidence & Engineering", zh: "一线实证抓取与工程拆解" },
-      maxExternalResearchCalls: deep ? 18 : 12,
-      maxModelSteps: deep ? 28 : 20,
-      maxSameDomainFetches: deep ? 6 : 4,
-      minExternalWebSources: isActuary ? 1 : 2,
+      maxExternalResearchCalls:
+        params.webCapable === false
+          ? 0
+          : effectiveQoS === "primary"
+            ? deep
+              ? 28
+              : 20
+            : effectiveQoS === "secondary"
+              ? deep
+                ? 7
+                : 5
+              : deep
+                ? 18
+                : 12,
+      maxModelSteps:
+        effectiveQoS === "primary"
+          ? deep
+            ? 34
+            : 24
+          : effectiveQoS === "secondary"
+            ? deep
+              ? 18
+              : 12
+            : deep
+              ? 26
+              : 18,
+      maxSameDomainFetches:
+        params.webCapable === false
+          ? 0
+          : effectiveQoS === "primary"
+            ? deep
+              ? 8
+              : 6
+            : effectiveQoS === "secondary"
+              ? 3
+              : deep
+                ? 5
+                : 4,
+      minExternalWebSources: params.webCapable === false ? 0 : isActuary ? 1 : 2,
     },
     synthesis: {
       label: { en: "Quantitative Convergence & Modeling", zh: "定量精算收敛与多档建模" },

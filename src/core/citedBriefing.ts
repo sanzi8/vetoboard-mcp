@@ -539,6 +539,7 @@ export function assembleDualLayerReport(params: {
   readonly whiteboardLedgerMarkdown?: string;
   readonly lockedSharedContract?: string;
   readonly mountedKnowledgeMarkdown?: string;
+  readonly quotaPoolMarkdown?: string;
   readonly auditSealStats?: {
     readonly rolesCount: number;
     readonly sourcesCount: number;
@@ -777,6 +778,16 @@ export function assembleDualLayerReport(params: {
     briefingBlock,
   ].join("\n");
 
+  const quotaPoolSection = params.quotaPoolMarkdown?.trim()
+    ? [
+        zh
+          ? "## Borg 权重算力配额池与动态扩编台账"
+          : "## Borg Weighted Quota Pool & Dynamic Peer Ledger",
+        "",
+        params.quotaPoolMarkdown.trim(),
+      ].join("\n")
+    : "";
+
   const combinedReport = [
     `# ${zh ? "任务过程与决策审计报告" : "Decision Audit Report"}: ${params.goal}`,
     ...(sealBanner ? ["", sealBanner] : []),
@@ -784,6 +795,7 @@ export function assembleDualLayerReport(params: {
     briefingBlock,
     "",
     readinessSection,
+    ...(quotaPoolSection ? ["", quotaPoolSection] : []),
     ...(knowledgeProvenanceSection ? ["", knowledgeProvenanceSection] : []),
     "",
     deliberationSection,

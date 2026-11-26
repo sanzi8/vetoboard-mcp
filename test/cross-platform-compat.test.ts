@@ -9,6 +9,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   auditToolSchemaForAllVendors,
+  computeInitialBorgQuotaPool,
   createVetoBoardMcpServer,
   discoverNativeSkills,
   runExternalChatCompletion,
@@ -831,5 +832,244 @@ describe("Zero-Install 6-Platform Compatibility Matrix (DeepSeek/Hermes, Claude 
       preferNpx: true,
     });
     expect(safeRes2.backupsCreated ?? []).toHaveLength(0);
+  });
+
+  it("9. Borg Weighted Quota Pool (95/85/55 + Reflow + SRE Rework Freeze) + 2-Seat Dynamic Peer Expansion (`awaiting_peer_approval`) + Parallel SWE `workspace: \"share\"` Gate", async () => {
+    // 9a. Pure-functional Borg Quota Pool verification (`deep` mode: 95 vs 85 vs 55 + pure-local coding exclusion)
+    const deepPool = computeInitialBorgQuotaPool({
+      effortProfile: "deep",
+      tracks: [
+        { roleId: "market-analyst", roleLabel: "市场专员", trackId: "t1", webCapable: true, weight: 95 },
+        { roleId: "legal-advisor", roleLabel: "合规护栏", trackId: "t2", webCapable: true, weight: 85 },
+        { roleId: "operations-sop", roleLabel: "SOP支撑", trackId: "t3", webCapable: true, weight: 55 },
+        { roleId: "backend-local", roleLabel: "纯本地后端", trackId: "t4", webCapable: false, weight: 92 },
+        { kind: "inspector", roleId: "quality-inspector", roleLabel: "铁面督察", trackId: "t5", weight: 85 },
+      ],
+    });
+    const aLead = deepPool.allocations.find((a) => a.trackId === "t1")!;
+    const aGuard = deepPool.allocations.find((a) => a.trackId === "t2")!;
+    const aSec = deepPool.allocations.find((a) => a.trackId === "t3")!;
+    const aLocal = deepPool.allocations.find((a) => a.trackId === "t4")!;
+
+    expect(aLead.baseHelpers + aLead.burstHelpersCap).toBeGreaterThanOrEqual(5);
+    expect(aLead.baseResearch + aLead.burstResearchCap).toBeGreaterThanOrEqual(28);
+    expect(aLead.maxModelSteps).toBe(34);
+    expect(aGuard.baseResearch + aGuard.burstResearchCap).toBeGreaterThanOrEqual(18);
+    expect(aGuard.maxModelSteps).toBe(26);
+    expect(aSec.baseHelpers + aSec.burstHelpersCap).toBe(1);
+    expect(aSec.baseResearch).toBeGreaterThanOrEqual(6);
+    expect(aSec.baseResearch).toBeLessThanOrEqual(8);
+    expect(aSec.burstEligible).toBe(false);
+    expect(aSec.burstResearchCap).toBe(0);
+    // Pure local coding role consumes ZERO external web quota and doesn't dilute research seats
+    expect(aLocal.baseResearch).toBe(0);
+    expect(aLocal.burstResearchCap).toBe(0);
+    expect(deepPool.inspectorProtectedResearch).toBe(10);
+
+    // 9b. End-to-End MCP Workflow: SWE `workspace: "share"` Gate + 2 Auto-Approved Peers + 3rd Pauses + Approve/Reject + Reflow + Rework Freeze
+    const wsOut = join(tempDir, "borg-peer-ws");
+    await mkdir(wsOut, { recursive: true });
+
+    const startRes = await client.callTool({
+      arguments: {
+        allowOfflineAssumptions: true,
+        domain: "swe",
+        effortProfile: "fast",
+        goal: "全栈实现多租户权限中心与计费对账模块",
+        lang: "zh",
+        lineupConfirmed: true,
+        maxDynamicPeerRoles: 2,
+        roleIds: ["software-architect", "backend-engineer"],
+        topologyMode: "flat",
+        weightOverrides: {
+          "backend-engineer": 95,
+          "software-architect": 95,
+        },
+        workspaceDir: wsOut,
+      },
+      name: "vetoboard_start_council",
+    });
+    const startText = firstText(startRes);
+    const taskIdMatch = /Task ID:\s*`(vb_[a-z0-9_]+)`/i.exec(startText);
+    expect(taskIdMatch).toBeTruthy();
+    const taskId = taskIdMatch![1]!;
+    expect(startText).toContain("Borg 配额池");
+
+    // Architect passes deliverable using only 2 web calls -> unused base quota reflows into shared pool!
+    await client.callTool({
+      arguments: {
+        invokedTools: ["WebSearch"],
+        markdown: "# 架构契约\n### 呈批摘要卡\n- 锁定共享接口契约 https://developer.mozilla.org/en-US/docs/Web",
+        researchCallsUsed: 2,
+        stage: "deliverable",
+        taskId,
+        trackId: "track-1-software-architect",
+      },
+      name: "vetoboard_submit_track_output",
+    });
+
+    const afterArch = (await store.getTask(taskId))!;
+    expect(afterArch.quotaPool!.reflowedResearchTotal).toBeGreaterThan(0);
+
+    // Trigger SRE Rework Freeze on `backend-engineer` by violating its no-stub hard rule (`TODO: implement`)
+    const reworkRes = await client.callTool({
+      arguments: {
+        markdown: "# 后端草稿\n// TODO: implement auth handler",
+        stage: "deliverable",
+        taskId,
+        trackId: "track-2-backend-engineer",
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    expect(reworkRes.isError).toBe(true);
+    const afterRework = (await store.getTask(taskId))!;
+    const backendAlloc = afterRework.quotaPool!.allocations.find(
+      (a) => a.trackId === "track-2-backend-engineer",
+    )!;
+    expect(backendAlloc.burstFrozenByRework).toBe(true);
+
+    // Now `backend-engineer` fixes its deliverable AND dynamically requests 2 peer roles (`frontend-engineer` + `saas-billing-architect`) -> Seats 1/2 & 2/2 Auto-Approved!
+    const peerAutoRes = await client.callTool({
+      arguments: {
+        markdown: "# 后端实现\n### 呈批摘要卡\n- 已完成权限中间件与密封单测 https://nodejs.org/api/crypto.html",
+        requestPeerRoles: [
+          {
+            reason: "新增租户权限接口需前端组件联动实现四态交互",
+            roleId: "frontend-engineer",
+            weight: 90,
+          },
+          {
+            priorityTier: "secondary",
+            reason: "补充多租户计费账本对账口径",
+            roleId: "saas-billing-architect",
+            weight: 60,
+          },
+        ],
+        researchCallsUsed: 2,
+        stage: "deliverable",
+        taskId,
+        trackId: "track-2-backend-engineer",
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    const peerAutoText = firstText(peerAutoRes);
+    expect(peerAutoRes.isError).toBeFalsy();
+    expect(peerAutoText).toContain("DYNAMIC_PEER_AUTO_APPROVED");
+    // Parallel writable coding tracks (`backend-engineer` + `frontend-engineer`) MUST trigger host-native `workspace: "share"` directive & auto-pair `code-reviewer`!
+    expect(peerAutoText).toContain('workspace: "share"');
+    expect(peerAutoText).toContain("code-reviewer");
+
+    const afterTwoPeers = (await store.getTask(taskId))!;
+    expect(afterTwoPeers.dynamicPeerRolesUsed).toBe(2);
+    expect(afterTwoPeers.status).toBe("running");
+    expect(afterTwoPeers.tracks.some((t) => t.roleId === "frontend-engineer")).toBe(true);
+    expect(afterTwoPeers.tracks.some((t) => t.roleId === "code-reviewer")).toBe(true);
+
+    const feTrack = afterTwoPeers.tracks.find((t) => t.roleId === "frontend-engineer")!;
+    const billingTrack = afterTwoPeers.tracks.find((t) => t.roleId === "saas-billing-architect")!;
+
+    // `frontend-engineer` passes cleanly
+    await client.callTool({
+      arguments: {
+        markdown: "# 前端四态组件\n### 呈批摘要卡\n- 完整实现 Normal/Loading/Empty/Error 四态 https://react.dev",
+        researchCallsUsed: 1,
+        stage: "deliverable",
+        taskId,
+        trackId: feTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+
+    // `saas-billing-architect` passes AND requests a 3rd dynamic peer (`secops-custom`) -> Seat 3 exceeds 2/2 auto-approve limit and pauses safely!
+    const thirdPeerRes = await client.callTool({
+      arguments: {
+        invokedTools: ["WebSearch", "vetoboard_calc"],
+        markdown: "# 计费风控\n### 呈批摘要卡\n- TCC 幂等账本核算完成 https://stripe.com/docs",
+        requestPeerRoles: [
+          {
+            charter: "Audit webhook HMAC replay window & key rotation.",
+            reason: "发现外部 Webhook 回调缺少独立安全渗透复核",
+            roleId: "webhook-secops",
+            title: "Webhook 安全渗透专员",
+            weight: 85,
+          },
+        ],
+        researchCallsUsed: 2,
+        stage: "deliverable",
+        taskId,
+        trackId: billingTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    const thirdPeerText = firstText(thirdPeerRes);
+    expect(thirdPeerText).toContain("PEER_ROLE_APPROVAL_REQUIRED");
+
+    const pausedState = (await store.getTask(taskId))!;
+    expect(pausedState.status).toBe("paused");
+    expect(pausedState.deliberationPhase).toBe("awaiting_peer_approval");
+    // Billing track's own deliverable was saved as `passed` with ZERO progress loss!
+    expect(pausedState.tracks.find((t) => t.trackId === billingTrack.trackId)?.status).toBe("passed");
+
+    // User replies "批准" -> `vetoboard_update_council({ approvePendingPeerRoles: true })` hot-inserts 3rd peer without re-running passed tracks!
+    const approveRes = await client.callTool({
+      arguments: {
+        approvePendingPeerRoles: true,
+        taskId,
+      },
+      name: "vetoboard_update_council",
+    });
+    expect(firstText(approveRes)).toContain("track-");
+    const resumedState = (await store.getTask(taskId))!;
+    expect(resumedState.status).toBe("running");
+    expect(resumedState.dynamicPeerRolesUsed).toBe(3);
+    // All 4 earlier specialists remain `passed` (zero re-runs!)
+    expect(resumedState.tracks.find((t) => t.roleId === "software-architect")?.status).toBe("passed");
+    expect(resumedState.tracks.find((t) => t.roleId === "backend-engineer")?.status).toBe("passed");
+    expect(resumedState.tracks.find((t) => t.roleId === "frontend-engineer")?.status).toBe("passed");
+    expect(resumedState.tracks.find((t) => t.roleId === "saas-billing-architect")?.status).toBe("passed");
+
+    const secopsTrack = resumedState.tracks.find((t) => t.roleId === "webhook-secops")!;
+    const reviewerTrack = resumedState.tracks.find((t) => t.roleId === "code-reviewer")!;
+    const inspectorTrack = resumedState.tracks.find((t) => t.roleId === "quality-inspector")!;
+
+    await client.callTool({
+      arguments: {
+        markdown: "# Webhook 安全核查\n### 呈批摘要卡\n- HMAC-SHA256 5分钟防重放窗口已闭合 https://owasp.org",
+        researchCallsUsed: 2,
+        stage: "deliverable",
+        taskId,
+        trackId: secopsTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+
+    await client.callTool({
+      arguments: {
+        markdown: "# Critique 代码审查\n### 呈批摘要卡\n- LGTM (0 Blocking, 1 Nit) https://google.github.io/eng-practices/",
+        researchCallsUsed: 1,
+        stage: "deliverable",
+        taskId,
+        trackId: reviewerTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+
+    const finalRes = await client.callTool({
+      arguments: {
+        executiveBriefingMarkdown:
+          "### 终局裁决\n全栈权限与计费模块通过验收 [[S1·§1]](#ref-s1-sec1) [[S2·§1]](#ref-s2-sec1) [[V1]](#ref-v1)。",
+        invokedTools: ["vetoboard_calc"],
+        markdown: "# [V1] 独立复算\n| 指标 | 结果 |\n| --- | --- |\n| 单测与对账 | PASS |",
+        stage: "deliverable",
+        taskId,
+        trackId: inspectorTrack.trackId,
+      },
+      name: "vetoboard_submit_track_output",
+    });
+    expect(finalRes.isError).toBeFalsy();
+    const finalReport = (await store.readFinalReport(taskId)) ?? "";
+    expect(finalReport).toContain("## Borg 权重算力配额池与动态扩编台账");
+    expect(finalReport).toContain("🔒返工冻结抢占");
+    expect(finalReport).toContain("⚡动态增援");
   });
 });

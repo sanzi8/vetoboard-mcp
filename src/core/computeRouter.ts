@@ -1,6 +1,38 @@
 import type { VetoBoardLocale } from "../i18n/locales.js";
-import { formatModelBindingLabel, renderRoleCharterPrompt } from "./roleCatalog.js";
+import { renderBorgRoleCharterBadge } from "./borgQuotaPool.js";
+import { findRoleTemplate, formatModelBindingLabel, renderRoleCharterPrompt } from "./roleCatalog.js";
 import type { RoleModelBinding, RoleTemplate, VetoBoardExecutionMode, VetoBoardTaskRecord } from "./types.js";
+
+function isWritableCodingRole(tpl: RoleTemplate | undefined): boolean {
+  if (!tpl || tpl.kind === "inspector") return false;
+  if (tpl.readOnly === false) return true;
+  return tpl.allowedTools.some((tool) => {
+    const low = tool.trim().toLowerCase();
+    return low === "edit" || low === "write" || low === "edit_file" || low === "write_file";
+  });
+}
+
+export function buildHostNativeWorktreeIsolationDirective(params: {
+  readonly writableTrackIds: readonly string[];
+  readonly locale: VetoBoardLocale;
+}): string {
+  if (params.writableTrackIds.length < 2) return "";
+  const listStr = params.writableTrackIds.map((id) => `\`${id}\``).join(", ");
+  if (params.locale === "zh") {
+    return [
+      `### 🌿 并行编码物理工作树隔离门禁（检测到 ${params.writableTrackIds.length} 条可写编码轨道并发：${listStr}）`,
+      `- **严禁多角色在同一工作目录裸改代码互相污染 \`PresubmitCheck\`（\`tsc\` / \`vitest\`）！** 请直接使用宿主原生工作树隔离原语（切勿在工作区外私建不受沙箱信任的目录）：`,
+      `  1. **Antigravity \`swarm\`**：启动上述可写编码 Worker 时**必须传入 \`workspace: "share"\`**（底层自动分配独立 Git Worktree 共享仓副本且不触发沙箱越界拦截）；待 \`code-reviewer\` / \`[V1]\` 签发 LGTM 后再合入主工作区并 \`kill\` 回收 Worker（若遇同行三方冲突，立即中止合并、保留分支并向用户汇报冲突文件清单）。`,
+      `  2. **Claude Code / Codex / T3 Code**：优先启用宿主原生 \`--worktree\` / T3 多 Harness 独立工作树；单目录宿主必须按 \`OWNERS\` 目录严格互斥落盘并在合流后统一跑全量单测。`,
+    ].join("\n");
+  }
+  return [
+    `### 🌿 Host-Native Git Worktree Isolation Gate (${params.writableTrackIds.length} Concurrent Writable Coding Tracks: ${listStr})`,
+    `- **NEVER let parallel coding specialists mutate the same working tree simultaneously and pollute each other's \`tsc\`/\`vitest\` runs!** Use your host's native worktree primitive:`,
+    `  1. **Antigravity \`swarm\`**: Pass \`workspace: "share"\` when calling \`swarm({ action: "add", workspace: "share", ... })\` for each writable coding track; merge into your main workspace ONLY after \`code-reviewer\` / \`[V1]\` LGTM (on real 3-way conflict, abort merge, preserve branch, and report conflicting files).`,
+    `  2. **Claude Code / Codex / T3 Code**: Use host-native \`--worktree\` / T3 harness worktrees, or enforce strict non-overlapping \`OWNERS\` directory boundaries before running full tests.`,
+  ].join("\n");
+}
 
 function renderTrackModelInstruction(binding: RoleModelBinding | undefined, locale: VetoBoardLocale): string {
   if (!binding) return "";
@@ -154,9 +186,19 @@ export function buildHostSubscriptionPlaybook(params: {
   const { task, roleByTrackId, locale } = params;
   const zh = locale === "zh";
 
+  const allocByTrack = new Map((task.quotaPool?.allocations ?? []).map((a) => [a.trackId, a]));
+  const writableTrackIds = task.tracks
+    .filter((tr) => tr.status !== "skipped" && isWritableCodingRole(roleByTrackId.get(tr.trackId) ?? findRoleTemplate(tr.roleId)))
+    .map((tr) => tr.trackId);
+  const worktreeGateBlock = buildHostNativeWorktreeIsolationDirective({
+    locale,
+    writableTrackIds,
+  });
+
   const kbBlock = task.mountedKnowledgeMarkdown?.trim()
     ? ["", task.mountedKnowledgeMarkdown.trim()]
     : [];
+  const postHeaderBlocks = worktreeGateBlock ? [...kbBlock, "", worktreeGateBlock] : kbBlock;
 
   if (task.topologyMode === "whiteboard-electre") {
     const wave1 = task.tracks.filter((tr) => tr.roleId !== "quality-inspector");
@@ -167,7 +209,7 @@ export function buildHostSubscriptionPlaybook(params: {
       ? [
           `## VetoBoard 动态共享白板剧本（Task ID: \`${task.taskId}\` · ELECTRE + QMV 数学裁决引擎 · 0 外部 API Token）`,
           `> **办公室共享白板铁律**：严禁拉群混战或全员陪聊！只启动 **1 批专员 Subagent（保留 \`conversationId\`）**：先 **100% 并发备课贴关键变量上白板** → **全员阅板留痕（无关/有利直接赞同吸收；意见相反按缺失维度精准寻人协商）** → **跑运筹学数学支配公式（D ≥ ${domPct}% · C ≥ 66.7% · 席位 ≥ 50% · 最多 2 轮零变化早停转人工）** → **并发收口定稿 + [V1] 质检存库退回普通对话**！`,
-          ...kbBlock,
+          ...postHeaderBlocks,
           "",
           "### 执行步骤指令（商业审计与软件代码构建通用 4 步状态机）：",
           "0. **⚠️ 子智能体联网与双通道 MCP 网关铁律（防 `[blocked_on_mcp]` 死锁！）**：",
@@ -179,10 +221,10 @@ export function buildHostSubscriptionPlaybook(params: {
           "3. **步骤 3 · 并发收口定稿（100% 并发，`stage: \"deliverable\"`）**：白板锁定后，通过 `send_message` 同时唤醒全部专员对齐白板变量并发提交完整底稿/代码方案（涉及算账必调 `vetoboard_calc` 传 `taskId`）。",
           "4. **步骤 4 · 质量检查 `[V1]` & 决策统帅全角标报告落盘 + 存知识库退场**：运行 `quality-inspector` 执行 `vetoboard_calc (mode='reconcile', taskId=...)` 并提交带 `≥10` 处 `[[Sx·§y]](#ref-sx-secy)` 角标的 `executiveBriefingMarkdown`。系统落盘三件套、存入实战知识库后，**立即干净退出 VetoBoard 模式回到普通对话**！",
         ]
-      : [
+        : [
           `## VetoBoard Dynamic Shared Whiteboard Playbook (Task ID: \`${task.taskId}\` · ELECTRE + QMV Governance Engine)`,
           `> **Shared Office Whiteboard Law**: Zero mesh brawls! Spawn 1 persistent batch of subagents: **① 100% Concurrent Prep & Post Variables (\`stage='board_post'\`)** -> **② Review & React (\`stage='board_review'\`: approve/absorb vs dynamic dimension consult)** -> **③ Mathematical Dominance Gate (D >= ${domPct}%, C >= 66.7%, Seats >= 50%, R<=2 Early Stop)** -> **④ Parallel Finalize (\`stage='deliverable'\`) + [V1] Audit, Knowledge Save & Exit**.`,
-          ...kbBlock,
+          ...postHeaderBlocks,
           "",
           "### Orchestration Protocol (4 Steps):",
           "0. **⚠️ Subagent Network, Coordinator MCP Gateway & Single-Agent Fallback**: NEVER spawn network-disabled sandboxes (e.g. Antigravity's `TypeName: \"research\"` has NO network access — use `TypeName: \"self\"` or `swarm` workers; Claude Code `Task`; Hermes `delegate_task`). **Crucial for `swarm` / MCP-less workers**: child workers without `call_mcp_tool` MUST write full deliverables to `<workspaceDir>/.vetoboard-tmp/" + task.taskId + "/<trackId>.md` so `@coordinator` submits via `vetoboard_submit_track_output({ markdownFilePath })` with zero copy-paste! **Single-Agent Hosts (Cursor / single-thread DeepSeek)**: if subagent spawning is unavailable, execute each track sequentially in isolated role passes while obeying all web-search & `vetoboard_calc` gates.",
@@ -193,10 +235,14 @@ export function buildHostSubscriptionPlaybook(params: {
         ];
 
     const renderBrief = (tr: (typeof task.tracks)[number]) => {
-      const tpl = roleByTrackId.get(tr.trackId);
+      const tpl = roleByTrackId.get(tr.trackId) ?? findRoleTemplate(tr.roleId);
       const baseCharter = tr.customCharter ?? (tpl ? renderRoleCharterPrompt(tpl, locale) : tr.title);
+      const borgAlloc = allocByTrack.get(tr.trackId);
+      const borgBanner = borgAlloc
+        ? `${renderBorgRoleCharterBadge(borgAlloc, task.effortProfile, locale)}\n\n`
+        : "";
       const modelTag = renderTrackModelInstruction(tr.modelBinding ?? tpl?.modelBinding, locale);
-      return [`#### Track \`${tr.trackId}\` (${tr.tierLabel} · Weight ${tr.weight}${modelTag})`, baseCharter].join("\n");
+      return [`#### Track \`${tr.trackId}\` (${tr.tierLabel} · Weight ${tr.weight}${modelTag})`, `${borgBanner}${baseCharter}`].join("\n");
     };
 
     return [
@@ -243,10 +289,14 @@ export function buildHostSubscriptionPlaybook(params: {
         ];
 
     const renderBrief = (tr: (typeof task.tracks)[number]) => {
-      const tpl = roleByTrackId.get(tr.trackId);
+      const tpl = roleByTrackId.get(tr.trackId) ?? findRoleTemplate(tr.roleId);
       const baseCharter = tr.customCharter ?? (tpl ? renderRoleCharterPrompt(tpl, locale) : tr.title);
+      const borgAlloc = allocByTrack.get(tr.trackId);
+      const borgBanner = borgAlloc
+        ? `${renderBorgRoleCharterBadge(borgAlloc, task.effortProfile, locale)}\n\n`
+        : "";
       const modelTag = renderTrackModelInstruction(tr.modelBinding ?? tpl?.modelBinding, locale);
-      return [`#### Track \`${tr.trackId}\` (${tr.tierLabel} · Weight ${tr.weight}${modelTag})`, baseCharter].join("\n");
+      return [`#### Track \`${tr.trackId}\` (${tr.tierLabel} · Weight ${tr.weight}${modelTag})`, `${borgBanner}${baseCharter}`].join("\n");
     };
 
     return [
@@ -297,7 +347,7 @@ export function buildHostSubscriptionPlaybook(params: {
     ? [
         `## VetoBoard 宿主订阅驱动剧本（Task ID: \`${task.taskId}\` · ${waveNumbers.length} 波次因果交锋 DAG · 0 外部 API Token 消耗）`,
         `> **VetoBoard 核心编排铁律**：严禁把多个专业角色排成互不阅读产物的孤立平行线！当前已编排 **${task.tracks.length} 轨 · ${waveNumbers.length} 波次因果交锋链路（档位：${task.effortProfile}）**，下游角色必须读取上游《奏折呈批卡》正面交锋、推翻伪假设并收敛定稿。`,
-        ...kbBlock,
+        ...postHeaderBlocks,
         "",
         `### 执行步骤指令（请宿主 Agent 严格按以下 ${waveNumbers.length} 个因果波次推进）：`,
         ...waveStepInstructions,
@@ -305,15 +355,19 @@ export function buildHostSubscriptionPlaybook(params: {
     : [
         `## VetoBoard Host-Subscription Playbook (Task ID: \`${task.taskId}\` · ${waveNumbers.length}-Wave Causal Clash DAG · 0 External API Tokens)`,
         `> **VetoBoard Causal DAG Law**: Specialists NEVER run as isolated blind parallel lines! VetoBoard has scheduled **${task.tracks.length} tracks across ${waveNumbers.length} causal waves (profile: ${task.effortProfile})** so downstream guardrails & actuaries directly challenge and revise upstream assumptions.`,
-        ...kbBlock,
+        ...postHeaderBlocks,
         "",
         `### Orchestration Protocol (${waveNumbers.length} Causal Waves):`,
         ...waveStepInstructions,
       ];
 
   const renderTrackBrief = (tr: (typeof task.tracks)[number]) => {
-    const tpl = roleByTrackId.get(tr.trackId);
+    const tpl = roleByTrackId.get(tr.trackId) ?? findRoleTemplate(tr.roleId);
     const baseCharter = tr.customCharter ?? (tpl ? renderRoleCharterPrompt(tpl, locale) : tr.title);
+    const borgAlloc = allocByTrack.get(tr.trackId);
+    const borgBanner = borgAlloc
+      ? `${renderBorgRoleCharterBadge(borgAlloc, task.effortProfile, locale)}\n\n`
+      : "";
     const crossClashMandate =
       tr.wave >= 2 && tr.roleId !== "quality-inspector"
         ? zh
@@ -327,7 +381,7 @@ export function buildHostSubscriptionPlaybook(params: {
     const modelTag = renderTrackModelInstruction(tr.modelBinding ?? tpl?.modelBinding, locale);
     return [
       `#### Track \`${tr.trackId}\` (Wave ${tr.wave}${tr.isTerminal ? " · ★ Terminal Convergence" : ""}${tr.dependsOn.length > 0 ? ` · dependsOn: ${tr.dependsOn.join(", ")}` : ""}${modelTag})`,
-      `${baseCharter}${crossClashMandate}`,
+      `${borgBanner}${baseCharter}${crossClashMandate}`,
     ].join("\n");
   };
 

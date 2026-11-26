@@ -70,7 +70,11 @@ export function renderDockerBuildProgress(
             ? zh
               ? "   ⏸ 白板阶段: 超阈值僵局 / 客观死穴已熔断，等待人工干预拍板"
               : "   ⏸ Whiteboard: Escalated to Human Intervention"
-            : task.status === "completed"
+            : task.deliberationPhase === "awaiting_peer_approval"
+              ? zh
+                ? `   ⏸ 动态扩编门禁: 免批名额 (${task.dynamicPeerRolesUsed}/${task.maxDynamicPeerRoles}) 已满，等待统帅批准/驳回新角色`
+                : `   ⏸ Dynamic Peer Gate: Auto-approve seats (${task.dynamicPeerRolesUsed}/${task.maxDynamicPeerRoles}) full — awaiting user approval`
+              : task.status === "completed"
               ? zh
                 ? "   ✅ 白板阶段: 已终检签发三件套并存入知识库 · 已退回普通对话"
                 : "   ✅ Whiteboard: Signed, Distilled to Knowledge Base & Exited"
@@ -99,6 +103,14 @@ export function renderDockerBuildProgress(
                 : "   🚀 Stage: Shared Contract Locked · 100% Parallel Heavy Execution"
       : undefined;
 
+  const pool = task.quotaPool;
+  const borgLine = pool
+    ? zh
+      ? `   📊 Borg 配额池: 外网 ${pool.totalResearchUsed}/${pool.totalResearchCap} 次 (回流 +${pool.reflowedResearchTotal} · 机动池余 ${pool.sharedResearchAvailable}) · 动态增援 ${task.dynamicPeerRolesUsed ?? 0}/${task.maxDynamicPeerRoles ?? 2}`
+      : `   📊 Borg Pool: Web ${pool.totalResearchUsed}/${pool.totalResearchCap} (reflow +${pool.reflowedResearchTotal} · shared ${pool.sharedResearchAvailable}) · Dynamic Peers ${task.dynamicPeerRolesUsed ?? 0}/${task.maxDynamicPeerRoles ?? 2}`
+    : undefined;
+  const allocByTrack = new Map((pool?.allocations ?? []).map((a) => [a.trackId, a]));
+
   const header = dict.progressHeader(done, total, formatDuration(elapsedMs), task.executionMode);
   const lines: string[] = [
     ansi ? `\x1b[1m${header}\x1b[0m` : header,
@@ -106,6 +118,7 @@ export function renderDockerBuildProgress(
     ...(task.lineupRationale && task.lineupRationale.length > 0
       ? [`   ${zh ? "⚖️ 定权依据" : "⚖️ Weighting"}: ${task.lineupRationale.join(" · ")}`]
       : []),
+    ...(borgLine ? [borgLine] : []),
     ...(delibLine ? [delibLine] : []),
   ];
 
@@ -122,9 +135,15 @@ export function renderDockerBuildProgress(
       tr.boundSkillIds && tr.boundSkillIds.length > 0
         ? ` {skills: ${tr.boundSkillIds.join(", ")}}`
         : "";
+    const alloc = allocByTrack.get(tr.trackId);
+    const quotaBadge = alloc
+      ? zh
+        ? ` {⚖️ ${alloc.webCapable ? `${alloc.baseResearch + alloc.burstResearchCap}搜` : "纯本地"}${alloc.baseHelpers + alloc.burstHelpersCap > 0 ? `/${alloc.baseHelpers + alloc.burstHelpersCap}小弟` : ""}${alloc.isDynamicPeer ? "·⚡增援" : ""}${alloc.burstFrozenByRework ? "·🔒缩权" : ""}}`
+        : ` {⚖️ ${alloc.webCapable ? `${alloc.baseResearch + alloc.burstResearchCap}w` : "local"}${alloc.baseHelpers + alloc.burstHelpersCap > 0 ? `/${alloc.baseHelpers + alloc.burstHelpersCap}h` : ""}${alloc.isDynamicPeer ? "·⚡peer" : ""}${alloc.burstFrozenByRework ? "·🔒frozen" : ""}}`
+      : "";
     const modelLabel = formatModelBindingLabel(tr.modelBinding);
     const modelBadge = modelLabel ? ` [model: ${modelLabel}]` : "";
-    const statusLine = ` => ${trackGlyph(tr.status, ansi)} [${idx + 1}/${task.tracks.length} ${tr.tierLabel}·${tr.weight}] ${tr.title}${modelBadge}${skillsBadge}${retrySuffix}${dur}`;
+    const statusLine = ` => ${trackGlyph(tr.status, ansi)} [${idx + 1}/${task.tracks.length} ${tr.tierLabel}·${tr.weight}] ${tr.title}${modelBadge}${quotaBadge}${skillsBadge}${retrySuffix}${dur}`;
     lines.push(statusLine);
 
     if (tr.summaryLine?.trim()) {

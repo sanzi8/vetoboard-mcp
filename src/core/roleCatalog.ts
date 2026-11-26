@@ -1698,14 +1698,28 @@ export function renderRoleCharterPrompt(
     kind: role.kind,
     roleId: role.roleId,
   });
+  const webCapable =
+    role.allowedTools.length === 0 ||
+    role.allowedTools.some((tool) =>
+      ["websearch", "webfetch", "search_web"].includes(tool.trim().toLowerCase()),
+    );
   const researchBudget = resolveTurnResearchBudget({
+    priorityTier: role.priorityTier,
     roleId: role.roleId,
     tier: effortTier,
+    webCapable,
+    weight: role.weight,
   });
   const budgetDirective = buildEffortScalingBudgetDirective({
     budget: researchBudget,
     locale,
   });
+  const peerExpansionHint =
+    role.kind === "professional"
+      ? zh
+        ? "- **动态平级扩编（`requestPeerRoles` · 2 席免批 + 超额拍板）**：若执行中发现跨领域盲区或跨 `OWNERS` 模块缺口（如后端需联动前端、商业立项缺税务/SaaS计费专员），切勿越界盲猜，可在提交 `vetoboard_submit_track_output` 时附带 `requestPeerRoles` 申请热插平级专员（前 2 席免批自动进场并从 Borg 公共回流池领额度，第 3+ 席自动暂停由统帅拍板）。"
+        : "- **Dynamic Peer Expansion (`requestPeerRoles` · 2 Auto-Approved + 3rd+ User Gate)**: If you uncover a cross-domain or cross-`OWNERS` gap mid-run, do NOT guess across boundaries — pass `requestPeerRoles` in `vetoboard_submit_track_output` (first 2 seats hot-insert automatically with Borg pool quota; 3rd+ pauses safely for user confirmation)."
+      : undefined;
 
   const rulesBlock = formatExecutableRulesForPrompt(role.executableRules, locale);
   const evHeader = zh ? "## 强制交付凭证要求" : "## Mandatory Evidence Requirements";
@@ -1718,6 +1732,7 @@ export function renderRoleCharterPrompt(
     budgetDirective,
     "",
     memorialRule,
+    ...(peerExpansionHint ? [peerExpansionHint] : []),
     "",
     evHeader,
     ...role.evidenceRequirements.map((req) => `- ${req}`),

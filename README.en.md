@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/MCP-Protocol%202025-1a73e8?style=flat-square" alt="MCP Protocol" />
-  <img src="https://img.shields.io/badge/Version-1.4.1-34a853?style=flat-square" alt="Version 1.4.1" />
+  <img src="https://img.shields.io/badge/Version-1.5.0-34a853?style=flat-square" alt="Version 1.5.0" />
   <img src="https://img.shields.io/badge/License-Apache%202.0-fbbc04?style=flat-square" alt="Apache 2.0 License" />
   <img src="https://img.shields.io/badge/Platform-Claude%20Code%20%7C%20Cursor%20%7C%20Antigravity%20%7C%20Codex%20%7C%20Hermes%20%7C%20T3%20Code-ea4335?style=flat-square" alt="Supported Platforms" />
 </p>
@@ -29,13 +29,13 @@
 Simply paste the prompt below directly into **Antigravity, Claude Code, Cursor, Codex, Hermes, or T3 Code** and let your agent install it for you:
 
 ```text
-Please install https://github.com/sanzi8/vetoboard-mcp for me: download vetoboard-mcp-v1.4.1.zip from the latest GitHub Release, extract it to ~/.vetoboard-mcp/runtime, and run `node ./dist/cli.js init --local-bin`.
+Please install https://github.com/sanzi8/vetoboard-mcp for me: download vetoboard-mcp-v1.5.0.zip from the latest GitHub Release, extract it to ~/.vetoboard-mcp/runtime, and run `node ./dist/cli.js init --local-bin`.
 ```
 
 Then click **`MCP Servers > Refresh`** in your IDE (or toggle `vetoboard-mcp` ON in Antigravity `Customizations`)!
 
 ### Option 2: Download Pre-Built Release Bundle Manually
-1. Visit **[Releases](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**, download `vetoboard-mcp-v1.4.1.zip`, and extract it to a permanent folder.
+1. Visit **[Releases](https://github.com/sanzi8/vetoboard-mcp/releases/latest)**, download `vetoboard-mcp-v1.5.0.zip`, and extract it to a permanent folder.
 2. Run the 1-command installer inside the extracted folder:
    ```bash
    node ./dist/cli.js init --local-bin

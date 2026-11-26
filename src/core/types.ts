@@ -237,6 +237,102 @@ export const hostModelCandidateSchema = z.object({
 
 export type HostModelCandidate = z.infer<typeof hostModelCandidateSchema>;
 
+export const roleQuotaAllocationSchema = z.object({
+  baseHelpers: z.number().int().nonnegative(),
+  baseResearch: z.number().int().nonnegative(),
+  burstEligible: z.boolean().default(false),
+  burstFrozenByRework: z.boolean().default(false),
+  burstHelpersCap: z.number().int().nonnegative(),
+  burstHelpersUsed: z.number().int().nonnegative().default(0),
+  burstResearchCap: z.number().int().nonnegative(),
+  burstResearchUsed: z.number().int().nonnegative().default(0),
+  helpersReflowed: z.number().int().nonnegative().default(0),
+  helpersUsed: z.number().int().nonnegative().default(0),
+  isDynamicPeer: z.boolean().optional(),
+  maxModelSteps: z.number().int().positive(),
+  maxSameDomainFetches: z.number().int().nonnegative(),
+  priorityTier: rolePriorityTierSchema,
+  researchReflowed: z.number().int().nonnegative().default(0),
+  researchUsed: z.number().int().nonnegative().default(0),
+  roleId: z.string().min(1),
+  roleLabel: z.string().min(1),
+  settledBoardPrep: z.boolean().optional(),
+  settledDeliverable: z.boolean().optional(),
+  trackId: z.string().min(1),
+  webCapable: z.boolean().default(true),
+  weight: z.number().int().min(10).max(100),
+});
+
+export type RoleQuotaAllocation = z.infer<typeof roleQuotaAllocationSchema>;
+
+export const quotaPoolSnapshotSchema = z.object({
+  allocations: z.array(roleQuotaAllocationSchema).default([]),
+  baseHelpersPool: z.number().int().nonnegative(),
+  baseResearchPool: z.number().int().nonnegative(),
+  burstHelpersPool: z.number().int().nonnegative(),
+  burstHelpersUsed: z.number().int().nonnegative().default(0),
+  burstResearchPool: z.number().int().nonnegative(),
+  burstResearchUsed: z.number().int().nonnegative().default(0),
+  inspectorProtectedResearch: z.number().int().nonnegative().default(6),
+  reflowedHelpersTotal: z.number().int().nonnegative().default(0),
+  reflowedResearchTotal: z.number().int().nonnegative().default(0),
+  sharedHelpersAvailable: z.number().int().nonnegative(),
+  sharedResearchAvailable: z.number().int().nonnegative(),
+  totalHelpersCap: z.number().int().nonnegative(),
+  totalHelpersUsed: z.number().int().nonnegative().default(0),
+  totalResearchCap: z.number().int().nonnegative(),
+  totalResearchUsed: z.number().int().nonnegative().default(0),
+  updatedAt: z.string().min(1),
+});
+
+export type QuotaPoolSnapshot = z.infer<typeof quotaPoolSnapshotSchema>;
+
+export const peerRoleRequestInputSchema = z.object({
+  charter: z
+    .string()
+    .optional()
+    .describe("Optional custom charter if requesting a bespoke peer role not in the built-in 16-role catalog."),
+  priorityTier: rolePriorityTierSchema
+    .optional()
+    .describe("Optional Borg priority tier ('primary' | 'guardrail' | 'secondary'); defaults to 'guardrail'."),
+  reason: z
+    .string()
+    .min(1)
+    .describe("Concrete cross-domain or cross-OWNERS gap requiring this peer specialist."),
+  roleId: z
+    .string()
+    .min(1)
+    .describe("Built-in roleId (e.g. 'legal-advisor', 'frontend-engineer'), 'spawn:<skillId>', or custom slug."),
+  title: z.string().optional().describe("Optional display title when creating a bespoke custom peer role."),
+  webCapable: z
+    .boolean()
+    .optional()
+    .describe("Set false for pure local coding roles that need zero external web search quota."),
+  weight: z.number().int().min(10).max(100).optional(),
+});
+
+export type PeerRoleRequestInput = z.infer<typeof peerRoleRequestInputSchema>;
+
+export const peerRoleRequestRecordSchema = z.object({
+  charter: z.string().optional(),
+  createdAt: z.string().min(1),
+  decidedAt: z.string().optional(),
+  pairedInspectorRoleId: z.string().optional(),
+  priorityTier: rolePriorityTierSchema.default("guardrail"),
+  reason: z.string().min(1),
+  requestId: z.string().min(1),
+  requestedByRoleLabel: z.string().min(1),
+  requestedByTrackId: z.string().min(1),
+  roleId: z.string().min(1),
+  spawnedTrackId: z.string().optional(),
+  status: z.enum(["auto_approved", "pending_user_approval", "user_approved", "user_rejected"]),
+  title: z.string().optional(),
+  webCapable: z.boolean().optional(),
+  weight: z.number().int().min(10).max(100).default(85),
+});
+
+export type PeerRoleRequestRecord = z.infer<typeof peerRoleRequestRecordSchema>;
+
 export const vetoboardTaskRecordSchema = z.object({
   allowOfflineAssumptions: z.boolean().default(false),
   calcChecksVerifiedCount: z.number().int().nonnegative().default(0),
@@ -245,18 +341,29 @@ export const vetoboardTaskRecordSchema = z.object({
   createdAt: z.string().min(1),
   deliberationOpinions: z.array(deliberationOpinionSchema).default([]),
   deliberationPhase: z
-    .enum(["round1", "round2", "paused_conflict", "contract_locked", "skipped"])
+    .enum([
+      "round1",
+      "round2",
+      "paused_conflict",
+      "awaiting_peer_approval",
+      "contract_locked",
+      "skipped",
+    ])
     .default("round1"),
   domain: z.enum(["commercial", "swe"]).default("commercial"),
+  dynamicPeerRolesUsed: z.number().int().nonnegative().default(0),
   effortProfile: effortProfileSchema,
   executionMode: executionModeSchema,
   goal: z.string().min(1),
   lineupRationale: z.array(z.string()).default([]),
   locale: z.enum(["en", "zh"]),
   lockedSharedContract: z.string().optional(),
+  maxDynamicPeerRoles: z.number().int().nonnegative().default(2),
   minorityReportMarkdown: z.string().optional(),
   mountedKnowledgeIds: z.array(z.string()).default([]),
   mountedKnowledgeMarkdown: z.string().optional(),
+  peerRoleRequests: z.array(peerRoleRequestRecordSchema).default([]),
+  quotaPool: quotaPoolSnapshotSchema.optional(),
   selectedRouteIds: z.array(z.string()).default([]),
   sessionId: z.string().optional(),
   status: z.enum(["clarifying", "running", "paused", "completed", "failed"]),

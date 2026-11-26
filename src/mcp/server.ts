@@ -22,10 +22,21 @@ import {
   extractAutoCatchesFromMarkdown,
 } from "../core/citedBriefing.js";
 import {
+  buildHostNativeWorktreeIsolationDirective,
   buildHostSubscriptionPlaybook,
   resolveExternalModelConfig,
   runExternalChatCompletion,
 } from "../core/computeRouter.js";
+import {
+  computeInitialBorgQuotaPool,
+  formatBorgQuotaLedgerForReport,
+  freezeTrackBurstOnRework,
+  isRoleTemplateWebCapable,
+  rebalanceBorgPoolWeights,
+  registerDynamicRoleInBorgPool,
+  renderBorgRoleCharterBadge,
+  settleBorgStageCompletion,
+} from "../core/borgQuotaPool.js";
 import {
   evaluateDeliberationArbitration,
   inferPriorityTierFromTrack,
@@ -93,10 +104,14 @@ import {
   executableRuleSchema,
   executionModeSchema,
   hostModelCandidateSchema,
+  peerRoleRequestInputSchema,
   roleModelBindingSchema,
   rolePriorityTierSchema,
   vetoboardLocaleInputSchema,
   type DeliberationOpinion,
+  type PeerRoleRequestInput,
+  type PeerRoleRequestRecord,
+  type QuotaPoolSnapshot,
   type RoleModelBinding,
   type RoleTemplate,
   type VetoBoardTaskRecord,
@@ -114,6 +129,498 @@ function textResult(text: string, isError = false) {
   return {
     content: [{ text, type: "text" as const }],
     ...(isError ? { isError: true } : {}),
+  };
+}
+
+function isWritableRoleTemplate(tpl: RoleTemplate | undefined, roleId: string): boolean {
+  if (!tpl) {
+    return roleId === "backend-engineer" || roleId === "frontend-engineer";
+  }
+  if (tpl.kind === "inspector") return false;
+  if (tpl.readOnly === false) return true;
+  return tpl.allowedTools.some((tool) => {
+    const low = tool.trim().toLowerCase();
+    return low === "edit" || low === "write" || low === "edit_file" || low === "write_file";
+  });
+}
+
+async function resolvePeerRoleTemplate(params: {
+  readonly req: Pick<
+    PeerRoleRequestInput,
+    "roleId" | "title" | "charter" | "reason" | "priorityTier" | "weight" | "webCapable"
+  >;
+  readonly locale: VetoBoardLocale;
+  readonly dataRootDir: string;
+  readonly workspaceDir?: string;
+}): Promise<{ readonly tpl: RoleTemplate; readonly boundSkillIds: string[] }> {
+  const { req, locale, dataRootDir, workspaceDir } = params;
+  const rawId = req.roleId.trim();
+  const cleanId = rawId.replace(/^spawn:/i, "").trim();
+  const lowerId = cleanId.toLowerCase();
+
+  let baseTpl = findRoleTemplate(lowerId);
+  let boundSkillIds: string[] = [];
+
+  if (!baseTpl) {
+    const retrieved = await retrieveReusableAssets({
+      dataRootDir,
+      goal: req.reason,
+      locale,
+      workspaceDir,
+    });
+    baseTpl = retrieved.roles.find((r) => r.role.roleId.toLowerCase() === lowerId)?.role;
+  }
+
+  if (!baseTpl) {
+    const discovered = await discoverNativeSkills({
+      dataRootDir,
+      locale,
+      workspaceDir,
+    });
+    const strippedSkillId = lowerId.replace(/^skill-/, "");
+    const matchedSkill = discovered.find(
+      (s) => s.skillId.toLowerCase() === lowerId || s.skillId.toLowerCase() === strippedSkillId,
+    );
+    if (matchedSkill) {
+      baseTpl = synthesizeRoleFromSkill(matchedSkill, locale, req.weight ?? 88);
+      boundSkillIds = [matchedSkill.skillId];
+    }
+  }
+
+  if (!baseTpl) {
+    const custom = customRoleToTemplate({
+      charter: req.charter?.trim() || req.reason,
+      priorityTier: req.priorityTier ?? "guardrail",
+      roleId: lowerId,
+      title: req.title?.trim() || cleanId,
+      weight: req.weight ?? 85,
+    });
+    baseTpl =
+      req.webCapable === false
+        ? {
+            ...custom,
+            allowedTools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "vetoboard_calc"],
+            domain: "swe",
+            readOnly: false,
+          }
+        : custom;
+  }
+
+  const finalWeight =
+    req.weight !== undefined ? Math.max(10, Math.min(100, Math.round(req.weight))) : baseTpl.weight;
+  const finalTier =
+    req.priorityTier ??
+    (req.weight !== undefined
+      ? finalWeight >= 90
+        ? "primary"
+        : finalWeight >= 70
+          ? "guardrail"
+          : "secondary"
+      : baseTpl.priorityTier);
+
+  return {
+    boundSkillIds,
+    tpl: {
+      ...baseTpl,
+      priorityTier: finalTier,
+      weight: finalWeight,
+      ...(req.webCapable === false
+        ? {
+            allowedTools: baseTpl.allowedTools.filter(
+              (tName) => !["websearch", "webfetch", "search_web"].includes(tName.toLowerCase()),
+            ),
+          }
+        : {}),
+    },
+  };
+}
+
+function refreshMultiWaveDependencies(
+  tracks: VetoBoardTaskRecord["tracks"],
+  now: string,
+): VetoBoardTaskRecord["tracks"] {
+  const doneSet = new Set(
+    tracks
+      .filter((tr) => tr.status === "passed" || tr.status === "skipped")
+      .map((tr) => tr.trackId),
+  );
+  return tracks.map((tr) => {
+    if (tr.wave <= 1) return tr;
+    const nextDeps = tracks
+      .filter((u) => u.wave < tr.wave && u.status !== "skipped")
+      .map((u) => u.trackId);
+    const ready = nextDeps.every((d) => doneSet.has(d));
+    let nextStatus = tr.status;
+    if (tr.status === "pending" && ready) {
+      nextStatus = "running";
+    } else if (tr.status === "running" && !ready) {
+      // Hold downstream inspector until newly hot-inserted peer specialist finishes!
+      nextStatus = "pending";
+    }
+    return {
+      ...tr,
+      dependsOn: nextDeps,
+      ...(nextStatus === "running" && !tr.startedAt ? { startedAt: now } : {}),
+      status: nextStatus,
+    };
+  });
+}
+
+function hotInsertApprovedPeerIntoTask(params: {
+  readonly task: VetoBoardTaskRecord;
+  readonly reqRecord: PeerRoleRequestRecord;
+  readonly tpl: RoleTemplate;
+  readonly boundSkillIds: readonly string[];
+  readonly now: string;
+}): {
+  readonly task: VetoBoardTaskRecord;
+  readonly spawnedTrackId: string;
+  readonly pairedInspectorRoleId: string;
+  readonly spawnPromptMarkdown: string;
+} {
+  const { task, reqRecord, tpl, boundSkillIds, now } = params;
+  const locale = task.locale;
+  const zh = locale === "zh";
+
+  const existingActive = task.tracks.find(
+    (tr) => tr.roleId === tpl.roleId && tr.status !== "skipped",
+  );
+  const isWritableSwe =
+    (tpl.domain === "swe" || task.domain === "swe") && isWritableRoleTemplate(tpl, tpl.roleId);
+  const pairedInspectorRoleId = isWritableSwe ? "code-reviewer" : "quality-inspector";
+
+  if (existingActive) {
+    return {
+      pairedInspectorRoleId,
+      spawnPromptMarkdown: "",
+      spawnedTrackId: existingActive.trackId,
+      task,
+    };
+  }
+
+  let tracks = task.tracks.slice();
+  const nonInspWaves = tracks
+    .filter((tItem) => tItem.roleId !== "quality-inspector" && tItem.roleId !== "code-reviewer")
+    .map((tItem) => tItem.wave);
+  const targetWave = nonInspWaves.length > 0 ? Math.max(...nonInspWaves) : 1;
+  const newTrackId = `track-${tracks.length + 1}-${tpl.roleId}`;
+
+  const contractAddendum = [
+    zh
+      ? `\n\n## ⚡ 动态增援使命（由 \`${reqRecord.requestedByTrackId}\` 发起 · 配对督察：\`${pairedInspectorRoleId}\`）\n- **增援事由**：${reqRecord.reason}`
+      : `\n\n## ⚡ Dynamic Peer Mandate (Requested by \`${reqRecord.requestedByTrackId}\` · Paired Inspector: \`${pairedInspectorRoleId}\`)\n- **Scope Gap**: ${reqRecord.reason}`,
+    ...(task.lockedSharedContract ? ["", task.lockedSharedContract] : []),
+    ...(task.mountedKnowledgeMarkdown ? ["", task.mountedKnowledgeMarkdown] : []),
+  ].join("\n");
+
+  const fullCharter = `${renderRoleCharterPrompt(tpl, locale)}${contractAddendum}`;
+  const newTrack: VetoBoardTaskRecord["tracks"][number] = {
+    boundSkillIds: [...boundSkillIds],
+    catches: [],
+    customCharter: fullCharter,
+    ...(tpl.executableRules.length > 0 ? { customRules: [...tpl.executableRules] } : {}),
+    dependsOn: [],
+    durationMs: 0,
+    maxRetries: task.effortProfile === "deep" ? 3 : 1,
+    ...(tpl.modelBinding ? { modelBinding: tpl.modelBinding } : {}),
+    retryCount: 0,
+    roleId: tpl.roleId,
+    roleLabel: tpl.name[locale],
+    startedAt: now,
+    status: "running",
+    tierLabel: resolveTierLabel(tpl, locale),
+    title: tpl.name[locale],
+    trackId: newTrackId,
+    wave: targetWave,
+    weight: tpl.weight,
+  };
+
+  const insertBeforeIdx = tracks.findIndex(
+    (tItem) =>
+      tItem.wave > targetWave ||
+      tItem.roleId === "code-reviewer" ||
+      tItem.roleId === "quality-inspector",
+  );
+  if (insertBeforeIdx >= 0) {
+    tracks.splice(insertBeforeIdx, 0, newTrack);
+  } else {
+    tracks.push(newTrack);
+  }
+
+  let quotaPool: QuotaPoolSnapshot =
+    task.quotaPool ??
+    computeInitialBorgQuotaPool({
+      effortProfile: task.effortProfile,
+      nowIso: now,
+      tracks: tracks
+        .filter((tr) => tr.trackId !== newTrackId)
+        .map((tr) => ({
+          kind: tr.roleId === "quality-inspector" ? "inspector" : "professional",
+          roleId: tr.roleId,
+          roleLabel: tr.roleLabel,
+          trackId: tr.trackId,
+          webCapable: isRoleTemplateWebCapable(findRoleTemplate(tr.roleId)),
+          weight: tr.weight,
+        })),
+    });
+
+  quotaPool = registerDynamicRoleInBorgPool(quotaPool, {
+    effortProfile: task.effortProfile,
+    nowIso: now,
+    seed: {
+      isDynamicPeer: true,
+      kind: "professional",
+      priorityTier: tpl.priorityTier,
+      roleId: tpl.roleId,
+      roleLabel: tpl.name[locale],
+      trackId: newTrackId,
+      webCapable: isRoleTemplateWebCapable(tpl, reqRecord.webCapable),
+      weight: tpl.weight,
+    },
+  });
+
+  const addedReviewerPrompts: string[] = [];
+  // Auto-pair SWE writable coding specialists with a read-only `code-reviewer` gate if absent!
+  if (
+    isWritableSwe &&
+    !tracks.some((tr) => tr.roleId === "code-reviewer" && tr.status !== "skipped")
+  ) {
+    const reviewerTpl = findRoleTemplate("code-reviewer")!;
+    const revWave = targetWave + 1;
+    const revTrackId = `track-${tracks.length + 1}-code-reviewer`;
+    const revCharter = renderRoleCharterPrompt(reviewerTpl, locale);
+    const revTrack: VetoBoardTaskRecord["tracks"][number] = {
+      boundSkillIds: [],
+      catches: [],
+      customCharter: revCharter,
+      dependsOn: [],
+      durationMs: 0,
+      maxRetries: 1,
+      retryCount: 0,
+      roleId: reviewerTpl.roleId,
+      roleLabel: reviewerTpl.name[locale],
+      status: "pending",
+      tierLabel: resolveTierLabel(reviewerTpl, locale),
+      title: reviewerTpl.name[locale],
+      trackId: revTrackId,
+      wave: revWave,
+      weight: reviewerTpl.weight,
+    };
+
+    tracks = tracks.map((tr) =>
+      tr.roleId === "quality-inspector" && tr.wave <= revWave ? { ...tr, wave: revWave + 1 } : tr,
+    );
+    const inspIdx = tracks.findIndex((tr) => tr.roleId === "quality-inspector");
+    if (inspIdx >= 0) {
+      tracks.splice(inspIdx, 0, revTrack);
+    } else {
+      tracks.push(revTrack);
+    }
+    quotaPool = registerDynamicRoleInBorgPool(quotaPool, {
+      effortProfile: task.effortProfile,
+      nowIso: now,
+      seed: {
+        isDynamicPeer: true,
+        kind: "professional",
+        priorityTier: "guardrail",
+        roleId: reviewerTpl.roleId,
+        roleLabel: reviewerTpl.name[locale],
+        trackId: revTrackId,
+        webCapable: true,
+        weight: reviewerTpl.weight,
+      },
+    });
+    addedReviewerPrompts.push(
+      `#### Paired Read-Only Critique Gate \`${revTrackId}\` (Wave ${revWave})\n${revCharter}`,
+    );
+  }
+
+  tracks = refreshMultiWaveDependencies(tracks, now);
+
+  const alloc = quotaPool.allocations.find((a) => a.trackId === newTrackId);
+  const borgBadge = alloc
+    ? `${renderBorgRoleCharterBadge(alloc, task.effortProfile, locale)}\n\n`
+    : "";
+
+  const writableTrackIds = tracks
+    .filter((tr) => tr.status !== "skipped" && isWritableRoleTemplate(findRoleTemplate(tr.roleId), tr.roleId))
+    .map((tr) => tr.trackId);
+  const worktreeNotice = buildHostNativeWorktreeIsolationDirective({
+    locale,
+    writableTrackIds,
+  });
+
+  const spawnPromptMarkdown = [
+    zh
+      ? `### ⚡ 动态平级专员已热插就绪：\`${newTrackId}\`（配对只读督察：\`${pairedInspectorRoleId}\` · 已完成轨道零重跑！）`
+      : `### ⚡ Dynamic Peer Hot-Inserted: \`${newTrackId}\` (Paired Inspector: \`${pairedInspectorRoleId}\` · Zero Re-Run of Passed Tracks!)`,
+    ...(worktreeNotice ? [worktreeNotice] : []),
+    `#### New Track \`${newTrackId}\` (${newTrack.tierLabel} · Weight ${newTrack.weight})\n${borgBadge}${fullCharter}`,
+    ...addedReviewerPrompts,
+  ].join("\n\n");
+
+  return {
+    pairedInspectorRoleId,
+    spawnPromptMarkdown,
+    spawnedTrackId: newTrackId,
+    task: {
+      ...task,
+      quotaPool,
+      tracks,
+      updatedAt: now,
+    },
+  };
+}
+
+async function applyIncomingPeerRoleRequests(params: {
+  readonly task: VetoBoardTaskRecord;
+  readonly requests: readonly PeerRoleRequestInput[] | undefined;
+  readonly requestedByTrackId: string;
+  readonly requestedByRoleLabel: string;
+  readonly dataRootDir: string;
+  readonly workspaceDir?: string;
+  readonly now: string;
+}): Promise<{
+  readonly task: VetoBoardTaskRecord;
+  readonly peerNoticeMarkdown: string;
+  readonly pausedForPeerApproval: boolean;
+}> {
+  if (!params.requests || params.requests.length === 0) {
+    return { pausedForPeerApproval: false, peerNoticeMarkdown: "", task: params.task };
+  }
+
+  let currentTask = params.task;
+  const zh = currentTask.locale === "zh";
+  const notices: string[] = [];
+  const pendingApprovalLines: string[] = [];
+  let pausedForPeerApproval = false;
+
+  for (const req of params.requests) {
+    const cleanRoleId = req.roleId.trim().replace(/^spawn:/i, "").toLowerCase();
+    const alreadyOnBench = currentTask.tracks.some(
+      (tr) => tr.roleId.toLowerCase() === cleanRoleId && tr.status !== "skipped",
+    );
+    const alreadyPending = currentTask.peerRoleRequests.some(
+      (r) => r.roleId.toLowerCase() === cleanRoleId && r.status === "pending_user_approval",
+    );
+    if (alreadyOnBench || alreadyPending) continue;
+
+    const requestId = `peer_req_${currentTask.peerRoleRequests.length + 1}`;
+    const maxSeats = currentTask.maxDynamicPeerRoles ?? 2;
+    const usedSeats = currentTask.dynamicPeerRolesUsed ?? 0;
+
+    if (usedSeats < maxSeats) {
+      const resolved = await resolvePeerRoleTemplate({
+        dataRootDir: params.dataRootDir,
+        locale: currentTask.locale,
+        req,
+        workspaceDir: params.workspaceDir ?? currentTask.workspaceDir,
+      });
+      const baseRecord: PeerRoleRequestRecord = {
+        ...(req.charter ? { charter: req.charter } : {}),
+        createdAt: params.now,
+        decidedAt: params.now,
+        priorityTier: resolved.tpl.priorityTier,
+        reason: req.reason,
+        requestId,
+        requestedByRoleLabel: params.requestedByRoleLabel,
+        requestedByTrackId: params.requestedByTrackId,
+        roleId: resolved.tpl.roleId,
+        status: "auto_approved",
+        ...(req.title ? { title: req.title } : {}),
+        ...(req.webCapable !== undefined ? { webCapable: req.webCapable } : {}),
+        weight: resolved.tpl.weight,
+      };
+      const inserted = hotInsertApprovedPeerIntoTask({
+        boundSkillIds: resolved.boundSkillIds,
+        now: params.now,
+        reqRecord: baseRecord,
+        task: currentTask,
+        tpl: resolved.tpl,
+      });
+      const nextUsed = usedSeats + 1;
+      const finalizedRecord: PeerRoleRequestRecord = {
+        ...baseRecord,
+        pairedInspectorRoleId: inserted.pairedInspectorRoleId,
+        spawnedTrackId: inserted.spawnedTrackId,
+      };
+      currentTask = {
+        ...inserted.task,
+        dynamicPeerRolesUsed: nextUsed,
+        lineupRationale: [
+          ...(inserted.task.lineupRationale ?? []),
+          zh
+            ? `⚡ 动态免批热插 (${nextUsed}/${maxSeats}): 新增「${resolved.tpl.name.zh}」(配对 ${inserted.pairedInspectorRoleId})`
+            : `⚡ Auto-Approved Dynamic Peer (${nextUsed}/${maxSeats}): Added "${resolved.tpl.name.en}" (paired ${inserted.pairedInspectorRoleId})`,
+        ],
+        peerRoleRequests: [...inserted.task.peerRoleRequests, finalizedRecord],
+      };
+      if (inserted.spawnPromptMarkdown) {
+        notices.push(
+          zh
+            ? `> ⚡ **[DYNAMIC_PEER_AUTO_APPROVED · 免批名额 ${nextUsed}/${maxSeats}]** 已自动从 Borg 公共回流池划拨配额并热插新专员轨道，请立即并行启动下方新轨道（已完成轨道 0 重跑！）：\n\n${inserted.spawnPromptMarkdown}`
+            : `> ⚡ **[DYNAMIC_PEER_AUTO_APPROVED · Seat ${nextUsed}/${maxSeats}]** Drawn quota from Borg shared/reflow pool and hot-inserted peer track — spawn immediately (zero re-runs on passed tracks!):\n\n${inserted.spawnPromptMarkdown}`,
+        );
+      }
+    } else {
+      pausedForPeerApproval = true;
+      const pendingRec: PeerRoleRequestRecord = {
+        ...(req.charter ? { charter: req.charter } : {}),
+        createdAt: params.now,
+        priorityTier: req.priorityTier ?? "guardrail",
+        reason: req.reason,
+        requestId,
+        requestedByRoleLabel: params.requestedByRoleLabel,
+        requestedByTrackId: params.requestedByTrackId,
+        roleId: cleanRoleId,
+        status: "pending_user_approval",
+        ...(req.title ? { title: req.title } : {}),
+        ...(req.webCapable !== undefined ? { webCapable: req.webCapable } : {}),
+        weight: req.weight ?? 85,
+      };
+      currentTask = {
+        ...currentTask,
+        deliberationPhase: "awaiting_peer_approval",
+        peerRoleRequests: [...currentTask.peerRoleRequests, pendingRec],
+        status: "paused",
+        updatedAt: params.now,
+      };
+      pendingApprovalLines.push(
+        zh
+          ? `- **申请单 \`${requestId}\`**：增补平级角色 \`${req.title || cleanRoleId}\`（由 \`${params.requestedByRoleLabel}\` 发起 · 权重 ${pendingRec.weight}）\n  - **跨界缺口原因**：${req.reason}`
+          : `- **Request \`${requestId}\`**: Add peer role \`${req.title || cleanRoleId}\` (requested by \`${params.requestedByRoleLabel}\` · W${pendingRec.weight})\n  - **Reason**: ${req.reason}`,
+      );
+    }
+  }
+
+  if (pausedForPeerApproval) {
+    const maxSeats = currentTask.maxDynamicPeerRoles ?? 2;
+    const usedSeats = currentTask.dynamicPeerRolesUsed ?? 0;
+    notices.push(
+      zh
+        ? [
+            `⏸ **[PEER_ROLE_APPROVAL_REQUIRED] 免批动态增援名额（${usedSeats}/${maxSeats}）已用满 · 待统帅在聊天流拍板确认（严禁调用 \`ask_question\` 弹窗！）**`,
+            "当前步骤产物已 100% 安全落盘保存，零进度损失。请直接在普通对话中向用户展示下方申请单并结束本轮：",
+            ...pendingApprovalLines,
+            "",
+            `- 回复 **「批准」**：调用 \`vetoboard_update_council({ taskId: "${currentTask.taskId}", approvePendingPeerRoles: true })\` 原地热插续跑（已完成步骤零重跑）；`,
+            `- 回复 **「驳回」**：调用 \`vetoboard_update_council({ taskId: "${currentTask.taskId}", rejectPendingPeerRoles: true })\` 按当前原阵容继续推进。`,
+          ].join("\n")
+        : [
+            `⏸ **[PEER_ROLE_APPROVAL_REQUIRED] Auto-Approve Dynamic Peer Quota (${usedSeats}/${maxSeats}) Reached — Ask User in Plain Chat (Do NOT call \`ask_question\`!)**`,
+            "Current step output is safely saved with zero progress loss. Present the pending request(s) below in chat and end your turn:",
+            ...pendingApprovalLines,
+            "",
+            `- On **"Approve"**: call \`vetoboard_update_council({ taskId: "${currentTask.taskId}", approvePendingPeerRoles: true })\` to hot-insert & resume (zero re-runs);`,
+            `- On **"Reject"**: call \`vetoboard_update_council({ taskId: "${currentTask.taskId}", rejectPendingPeerRoles: true })\` to continue with the existing lineup.`,
+          ].join("\n"),
+    );
+  }
+
+  return {
+    pausedForPeerApproval,
+    peerNoticeMarkdown: notices.length > 0 ? `\n\n${notices.join("\n\n")}` : "",
+    task: currentTask,
   };
 }
 
@@ -622,6 +1129,15 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .describe(
             "Set to true ONLY AFTER the user has reviewed/answered the Role & Native-Skill Selection card (or explicitly asked to skip selection and run immediately).",
           ),
+        maxDynamicPeerRoles: z
+          .number()
+          .int()
+          .min(0)
+          .max(10)
+          .optional()
+          .describe(
+            "Max auto-approved dynamic peer specialist seats before pausing for user confirmation (default 2).",
+          ),
         mountKnowledge: z
           .boolean()
           .default(true)
@@ -1034,6 +1550,29 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         );
       }
 
+      const maxDynamicPeerRoles = args.maxDynamicPeerRoles ?? 2;
+      const quotaPool = computeInitialBorgQuotaPool({
+        effortProfile: args.effortProfile,
+        nowIso: now,
+        tracks: tracks.map((tr) => {
+          const tpl = roleByTrackId.get(tr.trackId) ?? findRoleTemplate(tr.roleId);
+          return {
+            kind: tpl?.kind ?? (tr.roleId === "quality-inspector" ? "inspector" : "professional"),
+            priorityTier: tpl?.priorityTier,
+            roleId: tr.roleId,
+            roleLabel: tr.roleLabel,
+            trackId: tr.trackId,
+            webCapable: isRoleTemplateWebCapable(tpl),
+            weight: tr.weight,
+          };
+        }),
+      });
+      lineupRationale.push(
+        zh
+          ? `已激活 Borg 权重弹性配额池（外网总上限 ${quotaPool.totalResearchCap} 次 · 25% 抢占池 + 结余回流 · ${maxDynamicPeerRoles} 席免批动态扩编）`
+          : `Activated Borg Weighted Quota Pool (web cap ${quotaPool.totalResearchCap}, +25% burst & reflow, ${maxDynamicPeerRoles} auto-approved dynamic peer seats)`,
+      );
+
       const record: VetoBoardTaskRecord = {
         allowOfflineAssumptions: args.allowOfflineAssumptions,
         calcChecksVerifiedCount: 0,
@@ -1044,13 +1583,17 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         deliberationPhase:
           isParallelStage && specialistRoles.length >= 2 ? "round1" : "skipped",
         domain: args.domain,
+        dynamicPeerRolesUsed: 0,
         effortProfile: args.effortProfile,
         executionMode: args.executionMode,
         goal: args.goal,
         lineupRationale,
         locale,
+        maxDynamicPeerRoles,
         mountedKnowledgeIds: mountedKnowledgeCards.map((c) => c.knowledgeId),
         ...(mountedKnowledgeMarkdown ? { mountedKnowledgeMarkdown } : {}),
+        peerRoleRequests: [],
+        quotaPool,
         selectedRouteIds:
           args.selectedRouteIds ?? clarify.candidateRoutes.map((r) => r.routeId),
         ...(args.sessionId ? { sessionId: args.sessionId } : {}),
@@ -1096,6 +1639,13 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         "Modify an active council task mid-flight: promote/switch Primary Leads, adjust 10-100 role weights, skip/drop unwanted tracks, or inject new custom specialist tracks on the fly.",
       inputSchema: z.object({
         addCustomRoles: z.array(customRoleInputSchema).optional(),
+        approvePendingPeerRoles: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true when the user approves pending 3rd+ dynamic peer role requests (`awaiting_peer_approval`) to hot-insert them and resume without re-running passed tracks.",
+          ),
+        maxDynamicPeerRoles: z.number().int().min(0).max(10).optional(),
         modelOverrides: z
           .record(z.string(), z.union([z.string(), roleModelBindingSchema]))
           .optional()
@@ -1105,6 +1655,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .optional()
           .describe("Role IDs (or track IDs) to promote to Primary Lead (W>=95)."),
         reason: z.string().optional(),
+        rejectPendingPeerRoles: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true when the user rejects pending 3rd+ dynamic peer role requests (`awaiting_peer_approval`) to resume execution with the existing lineup.",
+          ),
         resolvePremiseConflictChoice: z
           .string()
           .optional()
@@ -1193,6 +1749,25 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
       });
 
       const addedCharters: string[] = [];
+      let nextQuotaPool: QuotaPoolSnapshot | undefined = task.quotaPool
+        ? rebalanceBorgPoolWeights(task.quotaPool, {
+            effortProfile: task.effortProfile,
+            nowIso: now,
+            tracks: tracks.map((tr) => {
+              const tpl = findRoleTemplate(tr.roleId);
+              return {
+                kind: tpl?.kind ?? (tr.roleId === "quality-inspector" ? "inspector" : "professional"),
+                priorityTier: tpl?.priorityTier,
+                roleId: tr.roleId,
+                roleLabel: tr.roleLabel,
+                trackId: tr.trackId,
+                webCapable: isRoleTemplateWebCapable(tpl),
+                weight: tr.weight,
+              };
+            }),
+          })
+        : undefined;
+
       const appendRoleTemplate = (tpl: RoleTemplate, boundSkillIds: string[] = []) => {
         const newIdx = tracks.length + 1;
         const trackId = `track-${newIdx}-${tpl.roleId}`;
@@ -1230,6 +1805,22 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         } else {
           tracks.push(newTrack);
         }
+        if (nextQuotaPool) {
+          nextQuotaPool = registerDynamicRoleInBorgPool(nextQuotaPool, {
+            effortProfile: task.effortProfile,
+            nowIso: now,
+            seed: {
+              isDynamicPeer: true,
+              kind: "professional",
+              priorityTier: tpl.priorityTier,
+              roleId: tpl.roleId,
+              roleLabel: tpl.name[locale],
+              trackId,
+              webCapable: isRoleTemplateWebCapable(tpl),
+              weight: tpl.weight,
+            },
+          });
+        }
         addedCharters.push(`#### New Track \`${trackId}\` (Wave ${targetWave})\n${charter}`);
       };
 
@@ -1252,32 +1843,85 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         }
       }
 
-      // Refresh causal `dependsOn` (`w < tr.wave`) and promote if all upstream dependencies already passed/skipped
-      const doneSet = new Set(
-        tracks
-          .filter((tr) => tr.status === "passed" || tr.status === "skipped")
-          .map((tr) => tr.trackId),
-      );
-      tracks = tracks.map((tr) => {
-        if (tr.wave <= 1) return tr;
-        const nextDeps = tracks
-          .filter((u) => u.wave < tr.wave && u.status !== "skipped")
-          .map((u) => u.trackId);
-        const ready = nextDeps.every((d) => doneSet.has(d));
-        return {
-          ...tr,
-          dependsOn: nextDeps,
-          ...(tr.status === "pending" && ready
-            ? { startedAt: now, status: "running" as const }
-            : {}),
-        };
-      });
+      let nextDynamicUsed = task.dynamicPeerRolesUsed ?? 0;
+      const nextMaxPeers = args.maxDynamicPeerRoles ?? task.maxDynamicPeerRoles ?? 2;
+      let nextPeerRequests = task.peerRoleRequests.slice();
+      let workingTaskState: VetoBoardTaskRecord = {
+        ...task,
+        dynamicPeerRolesUsed: nextDynamicUsed,
+        maxDynamicPeerRoles: nextMaxPeers,
+        peerRoleRequests: nextPeerRequests,
+        ...(nextQuotaPool ? { quotaPool: nextQuotaPool } : {}),
+        tracks,
+      };
+
+      let peerDecisionNote: string | undefined;
+      if (args.approvePendingPeerRoles) {
+        const pendingList = nextPeerRequests.filter((r) => r.status === "pending_user_approval");
+        for (const pending of pendingList) {
+          const resolved = await resolvePeerRoleTemplate({
+            dataRootDir: store.rootDir,
+            locale,
+            req: pending,
+            workspaceDir: args.workspaceDir ?? task.workspaceDir,
+          });
+          const inserted = hotInsertApprovedPeerIntoTask({
+            boundSkillIds: resolved.boundSkillIds,
+            now,
+            reqRecord: pending,
+            task: workingTaskState,
+            tpl: resolved.tpl,
+          });
+          workingTaskState = inserted.task;
+          nextDynamicUsed += 1;
+          nextPeerRequests = nextPeerRequests.map((r) =>
+            r.requestId === pending.requestId
+              ? {
+                  ...r,
+                  decidedAt: now,
+                  pairedInspectorRoleId: inserted.pairedInspectorRoleId,
+                  spawnedTrackId: inserted.spawnedTrackId,
+                  status: "user_approved" as const,
+                }
+              : r,
+          );
+          if (inserted.spawnPromptMarkdown) {
+            addedCharters.push(inserted.spawnPromptMarkdown);
+          }
+        }
+        tracks = workingTaskState.tracks;
+        nextQuotaPool = workingTaskState.quotaPool;
+        peerDecisionNote = zh
+          ? `统帅已批准 ${pendingList.length} 席超额平级增援热插续跑`
+          : `User approved ${pendingList.length} pending peer role request(s)`;
+      } else if (args.rejectPendingPeerRoles) {
+        const pendingCount = nextPeerRequests.filter((r) => r.status === "pending_user_approval").length;
+        nextPeerRequests = nextPeerRequests.map((r) =>
+          r.status === "pending_user_approval"
+            ? { ...r, decidedAt: now, status: "user_rejected" as const }
+            : r,
+        );
+        peerDecisionNote = zh
+          ? `统帅已驳回 ${pendingCount} 席超额增援申请，维持原阵容继续执行`
+          : `User rejected ${pendingCount} pending peer role request(s); continuing with current lineup`;
+      }
+
+      tracks = refreshMultiWaveDependencies(tracks, now);
 
       const conflictResolvedText = args.resolvePremiseConflictChoice?.trim();
+      const peerApprovalResolved = Boolean(args.approvePendingPeerRoles || args.rejectPendingPeerRoles);
+      const restoredDelibPhaseAfterPeer =
+        task.lockedSharedContract
+          ? ("contract_locked" as const)
+          : task.topologyMode === "whiteboard-electre" || task.topologyMode === "deliberate-then-parallel"
+            ? (task.whiteboardEntries.length > 0 ? ("round2" as const) : ("round1" as const))
+            : ("skipped" as const);
       const nextDelibPhase =
         conflictResolvedText && task.deliberationPhase === "paused_conflict"
           ? ("contract_locked" as const)
-          : task.deliberationPhase;
+          : peerApprovalResolved && task.deliberationPhase === "awaiting_peer_approval"
+            ? restoredDelibPhaseAfterPeer
+            : task.deliberationPhase;
       const nextLockedContract = conflictResolvedText
         ? [
             task.lockedSharedContract ?? "",
@@ -1287,18 +1931,25 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
             .join("\n")
         : task.lockedSharedContract;
       const nextTaskStatus =
-        conflictResolvedText && task.status === "paused" ? ("running" as const) : task.status;
+        (conflictResolvedText || peerApprovalResolved) && task.status === "paused"
+          ? ("running" as const)
+          : task.status;
 
       const rationaleNote =
-        conflictResolvedText
+        peerDecisionNote ??
+        (conflictResolvedText
           ? `${zh ? "用户裁决路线冲突放行并行执行" : "User resolved premise conflict"}: ${conflictResolvedText}`
           : args.reason?.trim() ||
-            (zh ? "运行中动态调整主导席位与权重" : "Mid-flight role weight & lead update");
+            (zh ? "运行中动态调整主导席位与权重" : "Mid-flight role weight & lead update"));
       const updatedTask: VetoBoardTaskRecord = {
         ...task,
         deliberationPhase: nextDelibPhase,
+        dynamicPeerRolesUsed: nextDynamicUsed,
         lineupRationale: [...(task.lineupRationale ?? []), rationaleNote],
         ...(nextLockedContract ? { lockedSharedContract: nextLockedContract } : {}),
+        maxDynamicPeerRoles: nextMaxPeers,
+        peerRoleRequests: nextPeerRequests,
+        ...(nextQuotaPool ? { quotaPool: nextQuotaPool } : {}),
         status: nextTaskStatus,
         tracks,
         updatedAt: now,
@@ -1362,6 +2013,12 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .string()
           .optional()
           .describe("ELECTRE Non-Compensatory Hard Veto proof (ONLY for grounded negative-margin vetoboard_calc math, compiler/test error, or statutory violation)."),
+        helpersUsed: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Optional count of read-only Explore helpers used in this stage for Borg Quota Pool tracking."),
         invokedSkills: z.array(z.string()).optional(),
         invokedTools: z.array(z.string()).optional(),
         keyConstraints: z.array(z.string()).optional(),
@@ -1378,6 +2035,18 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           .optional()
           .describe("Missing capability dimensions needed to break a deadlock (e.g. ['market', 'cost'])."),
         replyTo: z.array(z.string()).optional(),
+        requestPeerRoles: z
+          .array(peerRoleRequestInputSchema)
+          .optional()
+          .describe(
+            "Dynamically request peer specialist role(s) when discovering a cross-domain or cross-OWNERS gap mid-run (first 2 seats auto-approved with Borg reflow quota; 3rd+ pauses safely for user confirmation).",
+          ),
+        researchCallsUsed: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Optional count of external web searches/fetches executed in this stage for Borg Quota Pool settlement & reflow."),
         stage: z
           .enum(["board_post", "board_review", "round1", "round2", "deliverable"])
           .default("deliverable")
@@ -1520,27 +2189,65 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           ...task.whiteboardEntries.filter((e) => e.trackId !== targetTrack.trackId),
           nextEntry,
         ];
-        const postedIds = new Set(mergedEntries.map((e) => e.trackId));
-        const allPosted = activeSpecs.every((s) => postedIds.has(s.trackId));
 
-        const nextTask: VetoBoardTaskRecord = {
+        const settledPrepPool = task.quotaPool
+          ? settleBorgStageCompletion(task.quotaPool, {
+              helpersUsedInStage: args.helpersUsed ?? 0,
+              nowIso: now,
+              researchUsedInStage: args.researchCallsUsed ?? postUrls.length,
+              stage: "board_post",
+              trackId: targetTrack.trackId,
+            }).pool
+          : undefined;
+
+        const basePrepTask: VetoBoardTaskRecord = {
           ...task,
-          deliberationPhase: allPosted ? "round2" : "round1",
+          ...(settledPrepPool ? { quotaPool: settledPrepPool } : {}),
           updatedAt: now,
           whiteboardEntries: mergedEntries,
-          whiteboardRound: allPosted ? Math.max(1, task.whiteboardRound) : task.whiteboardRound,
+        };
+        const peerPrepRes = await applyIncomingPeerRoleRequests({
+          dataRootDir: store.rootDir,
+          now,
+          requestedByRoleLabel: targetTrack.roleLabel,
+          requestedByTrackId: targetTrack.trackId,
+          requests: args.requestPeerRoles,
+          task: basePrepTask,
+          workspaceDir: task.workspaceDir,
+        });
+
+        const updatedSpecs = peerPrepRes.task.tracks.filter(
+          (tItem) => tItem.roleId !== "quality-inspector" && tItem.status !== "skipped",
+        );
+        const postedIds = new Set(mergedEntries.map((e) => e.trackId));
+        const allPosted =
+          !peerPrepRes.pausedForPeerApproval &&
+          updatedSpecs.every((s) => postedIds.has(s.trackId));
+
+        const nextTask: VetoBoardTaskRecord = {
+          ...peerPrepRes.task,
+          deliberationPhase: peerPrepRes.pausedForPeerApproval
+            ? "awaiting_peer_approval"
+            : allPosted
+              ? "round2"
+              : "round1",
+          whiteboardRound: allPosted
+            ? Math.max(1, peerPrepRes.task.whiteboardRound)
+            : peerPrepRes.task.whiteboardRound,
         };
         await store.saveTask(nextTask);
         const treeBlock = ["```text", renderDockerBuildProgress(nextTask), "```"].join("\n");
         if (allPosted) {
-          return textResult(`${treeBlock}\n\n${renderPublicWhiteboardSnapshot(nextTask, locale)}`);
+          return textResult(
+            `${treeBlock}\n\n${renderPublicWhiteboardSnapshot(nextTask, locale)}${peerPrepRes.peerNoticeMarkdown}`,
+          );
         }
         return textResult(
           `${treeBlock}\n\n${
             zh
-              ? `⏳ 公开白板已上墙 ${postedIds.size}/${activeSpecs.length} 席（刚上板：${targetTrack.roleLabel}）。待全员并发上板齐备后自动开启阅板裁决！`
-              : `⏳ Whiteboard posts collected: ${postedIds.size}/${activeSpecs.length}.`
-          }`,
+              ? `⏳ 公开白板已上墙 ${postedIds.size}/${updatedSpecs.length} 席（刚上板：${targetTrack.roleLabel}）。待全员并发上板齐备后自动开启阅板裁决！`
+              : `⏳ Whiteboard posts collected: ${postedIds.size}/${updatedSpecs.length}.`
+          }${peerPrepRes.peerNoticeMarkdown}`,
         );
       }
 
@@ -1641,7 +2348,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
               ? ("paused_conflict" as const)
               : ("round2" as const);
 
-        const evaluatedTask: VetoBoardTaskRecord = {
+        const evaluatedBaseTask: VetoBoardTaskRecord = {
           ...tempTask,
           deliberationPhase: nextPhase,
           lockedSharedContract: evalRes.lockedContractMarkdown,
@@ -1652,9 +2359,19 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           whiteboardRound:
             evalRes.outcome === "CONSULTATION_REQUIRED" ? currentRound + 1 : currentRound,
         };
+        const peerReviewRes = await applyIncomingPeerRoleRequests({
+          dataRootDir: store.rootDir,
+          now,
+          requestedByRoleLabel: targetTrack.roleLabel,
+          requestedByTrackId: targetTrack.trackId,
+          requests: args.requestPeerRoles,
+          task: evaluatedBaseTask,
+          workspaceDir: task.workspaceDir,
+        });
+        const evaluatedTask = peerReviewRes.task;
         await store.saveTask(evaluatedTask);
         const treeBlock = ["```text", renderDockerBuildProgress(evaluatedTask), "```"].join("\n");
-        return textResult(`${treeBlock}\n\n${evalRes.nextStepPrompt}`);
+        return textResult(`${treeBlock}\n\n${evalRes.nextStepPrompt}${peerReviewRes.peerNoticeMarkdown}`);
       }
 
       // Stage A: Serial Short Deliberation (`round1` -> `round2` -> `contract_locked` / `paused_conflict`)
@@ -1840,6 +2557,24 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         };
       });
 
+      // Settle Borg Quota Pool (reflow unspent base quota on pass, or freeze burst on SRE rework/gate failure!)
+      let nextDelivPool = task.quotaPool;
+      if (nextDelivPool && targetTrack.roleId !== "quality-inspector") {
+        if (!gate.passed) {
+          nextDelivPool = freezeTrackBurstOnRework(nextDelivPool, targetTrack.trackId, now);
+        } else {
+          nextDelivPool = settleBorgStageCompletion(nextDelivPool, {
+            helpersUsedInStage: args.helpersUsed ?? 0,
+            isReworkAttempt: targetTrack.retryCount > 0,
+            nowIso: now,
+            researchUsedInStage:
+              args.researchCallsUsed ?? extractVerifiedHttpUrls(safeMarkdown).length,
+            stage: "deliverable",
+            trackId: targetTrack.trackId,
+          }).pool;
+        }
+      }
+
       // Promote Wave 2 tracks from pending -> running once all dependencies pass or are skipped
       const passedSet = new Set(
         updatedTracks
@@ -1856,14 +2591,34 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         return tr;
       });
 
-      const activeTracks = promotedTracks.filter((tr) => tr.status !== "skipped");
-      const allPassed =
-        activeTracks.length > 0 && activeTracks.every((tr) => tr.status === "passed");
-      const anyPaused = activeTracks.some((tr) => tr.status === "paused");
-      const updatedTask: VetoBoardTaskRecord = {
+      const prePeerTask: VetoBoardTaskRecord = {
         ...task,
-        status: allPassed ? "completed" : anyPaused ? "paused" : "running",
+        ...(nextDelivPool ? { quotaPool: nextDelivPool } : {}),
         tracks: promotedTracks,
+        updatedAt: now,
+      };
+      const peerDelivRes = await applyIncomingPeerRoleRequests({
+        dataRootDir: store.rootDir,
+        now,
+        requestedByRoleLabel: targetTrack.roleLabel,
+        requestedByTrackId: targetTrack.trackId,
+        requests: args.requestPeerRoles,
+        task: prePeerTask,
+        workspaceDir: task.workspaceDir,
+      });
+
+      const finalTracks = peerDelivRes.task.tracks;
+      const activeTracks = finalTracks.filter((tr) => tr.status !== "skipped");
+      const allPassed =
+        !peerDelivRes.pausedForPeerApproval &&
+        activeTracks.length > 0 &&
+        activeTracks.every((tr) => tr.status === "passed");
+      const anyPaused =
+        peerDelivRes.pausedForPeerApproval || activeTracks.some((tr) => tr.status === "paused");
+      const updatedTask: VetoBoardTaskRecord = {
+        ...peerDelivRes.task,
+        status: allPassed ? "completed" : anyPaused ? "paused" : "running",
+        tracks: finalTracks,
         updatedAt: now,
       };
       await store.saveTask(updatedTask);
@@ -1977,6 +2732,15 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
           ...(updatedTask.mountedKnowledgeMarkdown
             ? { mountedKnowledgeMarkdown: updatedTask.mountedKnowledgeMarkdown }
             : {}),
+          ...(updatedTask.quotaPool
+            ? {
+                quotaPoolMarkdown: formatBorgQuotaLedgerForReport(updatedTask.quotaPool, locale, {
+                  maxAutoApprove: updatedTask.maxDynamicPeerRoles ?? 2,
+                  totalRequests: updatedTask.peerRoleRequests.length,
+                  used: updatedTask.dynamicPeerRolesUsed ?? 0,
+                }),
+              }
+            : {}),
           verificationMarkdown: verifyMd,
           ...(updatedTask.whiteboardEntries.length > 0 || updatedTask.whiteboardReactions.length > 0
             ? { whiteboardLedgerMarkdown: formatWhiteboardLedgerForReport(updatedTask, locale) }
@@ -2069,7 +2833,7 @@ export function createVetoBoardMcpServer(options?: CreateVetoBoardMcpServerOptio
         : `\n\n**${gate.summary}**:\n${gate.hardViolations.map((v) => `- ${v.ruleTitle}: ${v.reason}`).join("\n")}`;
 
       return textResult(
-        `${progressBlock}${gateFeedback}\n\n${memorialCard}${reportNotice}`,
+        `${progressBlock}${gateFeedback}\n\n${memorialCard}${peerDelivRes.peerNoticeMarkdown}${reportNotice}`,
         !gate.passed,
       );
       }),
